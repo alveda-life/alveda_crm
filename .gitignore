@@ -1,0 +1,56 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Django
+backend/staticfiles/
+backend/media/
+*.log
+*.sqlite3
+db.sqlite3
+local_settings.py
+
+# Node / Quasar / Vite
+node_modules/
+frontend/dist/
+frontend/.quasar/
+frontend/.cache/
+.npm/
+.eslintcache
+.parcel-cache/
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.cursor/
+
+# Build / coverage
+dist/
+build/
+coverage/
+
+# Docker volumes (just in case)
+postgres_data/
+media_data/

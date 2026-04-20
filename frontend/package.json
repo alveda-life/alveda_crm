@@ -1,0 +1,31 @@
+{
+  "name": "ayurveda-crm-frontend",
+  "version": "1.0.0",
+  "description": "Ask Ayurveda CRM",
+  "scripts": {
+    "dev": "quasar dev",
+    "build": "quasar build",
+    "lint": "eslint --ext .js,.vue ./src"
+  },
+  "dependencies": {
+    "@quasar/extras": "^1.16.11",
+    "axios": "^1.6.7",
+    "marked": "^9.1.6",
+    "pinia": "^2.1.7",
+    "quasar": "^2.16.0",
+    "vue": "^3.4.18",
+    "vue-router": "^4.3.0",
+    "vuedraggable": "^4.1.0"
+  },
+  "devDependencies": {
+    "@quasar/app-vite": "^1.9.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-vue": "^9.22.0",
+    "sass": "^1.71.1",
+    "vite": "2.9.18"
+  },
+  "engines": {
+    "node": "^20.0.0",
+    "npm": "^10.0.0"
+  }
+}

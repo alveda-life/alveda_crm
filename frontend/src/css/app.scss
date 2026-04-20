@@ -1,0 +1,133 @@
+// Quasar SCSS variables
+@import './quasar.variables.scss';
+
+// Global styles
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Roboto', sans-serif;
+  background-color: #F5F7FA;
+}
+
+// Kanban scrollable columns
+.kanban-container {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+  min-height: calc(100vh - 180px);
+
+  &::-webkit-scrollbar {
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+  }
+}
+
+.kanban-column {
+  min-width: 300px;
+  max-width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kanban-cards {
+  flex: 1;
+  min-height: 200px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+
+  &.drag-over {
+    background-color: rgba(46, 125, 50, 0.08);
+  }
+}
+
+// Partner card
+.partner-card {
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  border-radius: 10px !important;
+  border-left: 4px solid transparent;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+  }
+
+  &.stage-new { border-left-color: #F44336; }
+  &.stage-trained { border-left-color: #FFB300; }
+  &.stage-trained-inactive { border-left-color: #90A4AE; }
+  &.stage-set_created { border-left-color: #29B6F6; }
+  &.stage-has_sale { border-left-color: #43A047; }
+  &.stage-no_answer { border-left-color: #546E7A; }
+  &.stage-declined { border-left-color: #B71C1C; }
+  &.stage-no_sales { border-left-color: #E65100; }
+}
+
+// Stage badge colors
+.badge-new { background: #ECEFF1; color: #546E7A; }
+.badge-trained { background: #FFF8E1; color: #F57F17; }
+.badge-set_created { background: #E1F5FE; color: #0277BD; }
+.badge-has_sale { background: #E8F5E9; color: #2E7D32; }
+.badge-no_answer { background: #ECEFF1; color: #455A64; }
+.badge-declined  { background: #FFEBEE; color: #B71C1C; }
+.badge-no_sales  { background: #FBE9E7; color: #BF360C; }
+
+// Type chip colors
+.chip-type-partner { background: #E3F2FD !important; color: #1565C0 !important; }
+.chip-type-medic   { background: #FCE4EC !important; color: #880E4F !important; }
+
+// Category chip colors
+.chip-doctor         { background: #EDE7F6 !important; color: #4527A0 !important; }
+.chip-fitness_trainer{ background: #E8F5E9 !important; color: #1B5E20 !important; }
+.chip-blogger        { background: #FFD54F !important; color: #3E2723 !important; }
+.chip-other          { background: #FFF8E1 !important; color: #E65100 !important; }
+
+
+// Stat value
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #2E7D32;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #9E9E9E;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+// Sidebar
+.sidebar-logo {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+// Audio player styling
+audio {
+  width: 100%;
+  border-radius: 8px;
+  outline: none;
+}
+
+// Smooth transitions
+.q-page {
+  transition: opacity 0.2s ease;
+}
+
+// Table hover
+.q-tr:hover {
+  background: rgba(46, 125, 50, 0.04);
+}
