@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 echo "Waiting for PostgreSQL..."
@@ -11,13 +11,27 @@ python manage.py makemigrations accounts partners contacts reports producers tas
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 
-python manage.py shell << 'EOF'
+python manage.py shell <<'EOF'
 from accounts.models import User
+
 if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', 'admin@askayurveda.com', 'admin123', role='admin')
+    User.objects.create_superuser(
+        'admin',
+        'admin@askayurveda.com',
+        'admin123',
+        role='admin'
+    )
     print("Admin created: admin / admin123")
+
 if not User.objects.filter(username='operator1').exists():
-    User.objects.create_user('operator1', 'op1@askayurveda.com', 'operator123', role='operator', first_name='Anna', last_name='Smith')
+    User.objects.create_user(
+        'operator1',
+        'op1@askayurveda.com',
+        'operator123',
+        role='operator',
+        first_name='Anna',
+        last_name='Smith'
+    )
     print("Operator created: operator1 / operator123")
 EOF
 
