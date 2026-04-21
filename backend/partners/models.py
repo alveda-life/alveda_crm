@@ -102,6 +102,13 @@ class Partner(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user_id'],
+                condition=~models.Q(user_id=''),
+                name='partners_partner_user_id_unique_when_set',
+            ),
+        ]
 
     DEAD_STAGES = {STAGE_NO_ANSWER, STAGE_DECLINED, STAGE_NO_SALES}
 
