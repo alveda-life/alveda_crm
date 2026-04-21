@@ -17,7 +17,7 @@
 
     <div class="text-caption text-grey-7 q-mb-md" style="max-width:840px;">
       Single source of truth for every process the CRM does on its own —
-      AI generation, data syncs from external systems (Asana, external CRM)
+      AI generation, data syncs from the external CRM
       and maintenance routines. Each card shows what the job does, when it
       runs next, when it last ran, what it produced, and lets you trigger it
       on demand. If a job stops working it shows up here as

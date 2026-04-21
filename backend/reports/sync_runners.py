@@ -21,12 +21,9 @@ logger = logging.getLogger(__name__)
 
 def _row_counts():
     """Snapshot of the main entity tables for summary deltas."""
-    from producers.models import Producer, ProducerComment
-    from partners.models   import Partner
+    from partners.models import Partner
     return {
-        'producers':         Producer.objects.count(),
-        'producer_comments': ProducerComment.objects.count(),
-        'partners':          Partner.objects.count(),
+        'partners': Partner.objects.count(),
     }
 
 
@@ -34,43 +31,41 @@ def _delta(before, after, key):
     return after.get(key, 0) - before.get(key, 0)
 
 
-# ── Asana: full producers sync ──────────────────────────────────────────────
-@logged_job('asana_producers_sync')
-def run_asana_producers_sync():
-    """Re-import every producer from the Asana board (full sync)."""
-    before = _row_counts()
-    buf = io.StringIO()
-    with redirect_stdout(buf), redirect_stderr(buf):
-        call_command('import_asana_producers')
-    after = _row_counts()
-    added = _delta(before, after, 'producers')
-    return f'Asana producers sync OK · total={after["producers"]} · new this run={added}'
-
-
-# ── Asana: comments / stories sync ──────────────────────────────────────────
-@logged_job('asana_comments_sync')
-def run_asana_comments_sync():
-    """Pull all task stories (comments) from Asana with original timestamps."""
-    before = _row_counts()
-    buf = io.StringIO()
-    with redirect_stdout(buf), redirect_stderr(buf):
-        call_command('sync_asana_comments')
-    after = _row_counts()
-    added = _delta(before, after, 'producer_comments')
-    return f'Asana comments sync OK · total={after["producer_comments"]} · new this run={added}'
+# Arbitrary 32-bit integer; must be the same value across all gunicorn workers.
+# Guards against concurrent CRM imports racing each other and creating duplicate
+# partner rows when APScheduler fires the same job in every worker simultaneously.
+_CRM_PARTNERS_SYNC_LOCK_KEY = 8472001
 
 
 # ── External CRM: partners import ───────────────────────────────────────────
 @logged_job('crm_partners_sync')
 def run_crm_partners_sync():
-    """Import partners from the external CRM API (incremental)."""
-    before = _row_counts()
-    buf = io.StringIO()
-    with redirect_stdout(buf), redirect_stderr(buf):
-        call_command('import_crm_contacts')
-    after = _row_counts()
-    added = _delta(before, after, 'partners')
-    return f'CRM partners sync OK · total={after["partners"]} · new this run={added}'
+    """Import partners from the external CRM API (incremental).
+
+    Wrapped in a PostgreSQL advisory lock so only one gunicorn worker actually
+    runs the import at any given tick — the others log "skipped" and exit.
+    """
+    from django.db import connection
+
+    with connection.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", [_CRM_PARTNERS_SYNC_LOCK_KEY])
+        got_lock = cur.fetchone()[0]
+
+    if not got_lock:
+        logger.info('crm_partners_sync skipped: another worker holds the advisory lock')
+        return 'CRM partners sync skipped (lock held by another worker)'
+
+    try:
+        before = _row_counts()
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(buf):
+            call_command('import_crm_contacts')
+        after = _row_counts()
+        added = _delta(before, after, 'partners')
+        return f'CRM partners sync OK · total={after["partners"]} · new this run={added}'
+    finally:
+        with connection.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", [_CRM_PARTNERS_SYNC_LOCK_KEY])
 
 
 # ── Maintenance: continuous self-healing of the AI pipeline ────────────────

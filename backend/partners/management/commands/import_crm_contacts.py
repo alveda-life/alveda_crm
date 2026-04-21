@@ -40,6 +40,36 @@ def fetch_all():
     return contacts
 
 
+# Ordered low → high. Used to decide whether an incoming auto-derived stage
+# is an upgrade over the partner's current stage. Manager-set stages further
+# down the pipeline (e.g. STAGE_TRAINED set by a human) are never downgraded
+# back to STAGE_NEW just because the API stats happen to be zero.
+def _derive_stage_from_stats(stats: dict) -> str:
+    """Map external CRM stats to our funnel stage.
+
+    Rules (ordered, first match wins):
+      paid_orders_count > 0 → 'has_sale'
+      medical_sets_count > 0 → 'set_created'
+      otherwise              → 'new'
+    """
+    from partners.models import Partner
+    if (stats.get('paid_orders_count') or 0) > 0:
+        return Partner.STAGE_HAS_SALE
+    if (stats.get('medical_sets_count') or 0) > 0:
+        return Partner.STAGE_SET_CREATED
+    return Partner.STAGE_NEW
+
+
+# Strict ordering for auto-derived stages: higher index = further along.
+# Stages NOT in this list (TRAINED, NO_ANSWER, DECLINED, NO_SALES) are
+# considered "manager-managed" and the API never overwrites them.
+_AUTO_STAGE_RANK = {
+    'new': 0,
+    'set_created': 1,
+    'has_sale': 2,
+}
+
+
 class Command(BaseCommand):
     help = 'Import/sync partners from the external CRM API'
 
@@ -94,8 +124,14 @@ class Command(BaseCommand):
                     referrals_count    = c.get('referrals_count')    or 0,
                 )
 
+                derived_stage = _derive_stage_from_stats(stats)
+
                 if uid in existing:
-                    # Update: refresh stats + basic info, preserve stage/control_date/assigned_to/notes
+                    # Update: refresh stats + basic info. Stage is auto-upgraded
+                    # only when the API-derived stage is strictly higher than the
+                    # current one AND the current stage is in the auto-managed set
+                    # (new / set_created / has_sale). Manager-set stages (trained,
+                    # no_answer, declined, no_sales) are never overwritten here.
                     p = existing[uid]
                     p.name     = c['name']
                     p.phone    = c.get('phone') or ''
@@ -104,14 +140,24 @@ class Command(BaseCommand):
                     p.referred_by = c.get('referred_by_name') or ''
                     for k, v in stats.items():
                         setattr(p, k, v)
-                    p.save(update_fields=[
+
+                    update_fields = [
                         'name', 'phone', 'type', 'category', 'referred_by',
                         'medical_sets_count', 'orders_count', 'paid_orders_count',
                         'paid_orders_sum', 'unpaid_orders_sum', 'referrals_count',
-                    ])
+                    ]
+
+                    current_rank = _AUTO_STAGE_RANK.get(p.stage)
+                    derived_rank = _AUTO_STAGE_RANK.get(derived_stage, 0)
+                    if current_rank is not None and derived_rank > current_rank:
+                        p.stage = derived_stage
+                        update_fields.append('stage')
+
+                    p.save(update_fields=update_fields)
                     updated_count += 1
                 else:
-                    # Create new
+                    # Create new — stage derived from stats so a partner who
+                    # already has paid orders lands directly in "Has Sale", not "New".
                     Partner.objects.create(
                         user_id   = uid,
                         name      = c['name'],
@@ -119,7 +165,7 @@ class Command(BaseCommand):
                         type      = c.get('type', 'partner'),
                         category  = category,
                         referred_by = c.get('referred_by_name') or '',
-                        stage     = Partner.STAGE_NEW,
+                        stage     = derived_stage,
                         **stats,
                     )
                     created_count += 1

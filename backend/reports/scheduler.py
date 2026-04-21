@@ -123,29 +123,9 @@ def start():
         except Exception as e:
             logger.error('Failed to register AI self-healing schedule: %s', e)
 
-        # ---- Data Sync (Asana / external CRM) ----
+        # ---- Data Sync (external CRM) ----
         try:
-            from .sync_runners import (
-                run_asana_producers_sync,
-                run_asana_comments_sync,
-                run_crm_partners_sync,
-            )
-            scheduler.add_job(
-                run_asana_producers_sync,
-                CronTrigger(minute='0,30', hour='9-19', timezone=IST_TZ),
-                id='asana_producers_sync',
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            scheduler.add_job(
-                run_asana_comments_sync,
-                CronTrigger(minute='0,15,30,45', hour='9-19', timezone=IST_TZ),
-                id='asana_comments_sync',
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
+            from .sync_runners import run_crm_partners_sync
             scheduler.add_job(
                 run_crm_partners_sync,
                 CronTrigger(minute=5, timezone=IST_TZ),
@@ -163,7 +143,6 @@ def start():
             'producer daily 18:00 Riga (Mon-Fri), producer weekly Fri 14:00 Riga, '
             'brand situation Fri 15:00 IST, brand-situation retry daily 18:00 IST (Mon-Fri), '
             'operator daily feedback 09:00 IST (Mon-Fri), weekly Mon 09:30 IST, '
-            'Asana producers every 30m 9-19 IST, Asana comments every 15m 9-19 IST, '
             'CRM partners hourly :05 IST.'
         )
     except Exception as e:

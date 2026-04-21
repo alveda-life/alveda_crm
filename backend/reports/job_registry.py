@@ -112,30 +112,6 @@ JOB_REGISTRY = [
 
     # ─── Data Sync (external APIs) ──────────────────────────────────────────
     {
-        'id': 'asana_producers_sync',
-        'category': 'data_sync',
-        'name': 'Asana → Producers sync',
-        'description': 'Pulls every task from the Asana producers board and upserts the local Producer table. Each successful run reports how many producers exist and how many were added in this pass.',
-        'schedule_human': 'Every 30 minutes, 09:00–19:30 Asia/Kolkata, daily',
-        'cron': {'minute': '0,30', 'hour': '9-19'},
-        'timezone': IST_TZ,
-        'artifact': 'Producers → All',
-        'artifact_path': '/producers',
-        'run_now': 'reports.sync_runners.run_asana_producers_sync',
-    },
-    {
-        'id': 'asana_comments_sync',
-        'category': 'data_sync',
-        'name': 'Asana → Producer comments sync',
-        'description': 'Pulls every Asana task story (comment) for every producer and upserts ProducerComment, preserving the original author and timestamp from Asana. Drives the Producer detail timeline.',
-        'schedule_human': 'Every 15 minutes, 09:00–19:45 Asia/Kolkata, daily',
-        'cron': {'minute': '0,15,30,45', 'hour': '9-19'},
-        'timezone': IST_TZ,
-        'artifact': 'Producer detail → Comments',
-        'artifact_path': '/producers',
-        'run_now': 'reports.sync_runners.run_asana_comments_sync',
-    },
-    {
         'id': 'crm_partners_sync',
         'category': 'data_sync',
         'name': 'External CRM → Partners sync',

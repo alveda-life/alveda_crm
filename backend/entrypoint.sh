@@ -22,9 +22,5 @@ if not User.objects.filter(username='operator1').exists():
 EOF
 fi
 
-if [ "${RUN_SEED_DATA:-}" = "true" ]; then
-  python manage.py seed_data
-fi
-
 WORKERS="${GUNICORN_WORKERS:-3}"
 exec gunicorn crm.wsgi:application --bind 0.0.0.0:8000 --workers "$WORKERS" --timeout 300 --access-logfile - --error-logfile -
