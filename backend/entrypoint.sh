@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 echo "Waiting for PostgreSQL..."
@@ -11,7 +11,7 @@ python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 
 if [ "${CREATE_DEMO_USERS:-}" = "true" ]; then
-  python manage.py shell << 'EOF'
+  python manage.py shell <<EOF
 from accounts.models import User
 if not User.objects.filter(username='admin').exists():
     User.objects.create_superuser('admin', 'admin@askayurveda.com', 'admin123', role='admin')
@@ -23,4 +23,9 @@ EOF
 fi
 
 WORKERS="${GUNICORN_WORKERS:-3}"
-exec gunicorn crm.wsgi:application --bind 0.0.0.0:8000 --workers "$WORKERS" --timeout 300 --access-logfile - --error-logfile -
+exec gunicorn crm.wsgi:application \
+  --bind 0.0.0.0:8000 \
+  --workers "$WORKERS" \
+  --timeout 300 \
+  --access-logfile - \
+  --error-logfile -
