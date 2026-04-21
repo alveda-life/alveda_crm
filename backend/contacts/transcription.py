@@ -8,102 +8,40 @@ from django.core.files.base import ContentFile
 logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY     = os.environ.get('OPENAI_API_KEY', '')
-MAX_FILE_SIZE      = 25 * 1024 * 1024  # 25 MB — OpenAI Whisper limit
+MAX_FILE_SIZE      = 25 * 1024 * 1024  # 25 MB — OpenAI audio API limit
 MAX_RETRIES        = 3
 RETRY_DELAYS       = [5, 15, 30]
 
-# Whisper's `prompt` parameter STRONGLY biases output toward the prompt's language
-# and even leaks prompt phrases into the transcript. We therefore use NO topic prompt
-# and instead rely on:
-#   - the `translations` endpoint which natively converts any input language → English
-#   - segment-level dedup + regex cleanup to neutralise loops
-#   - GPT-4o-mini second pass for diarization (Operator/Partner labelling)
+# We use OpenAI's `gpt-4o-transcribe` model (released March 2025) instead of
+# the legacy `whisper-1`. It does not loop on Hindi/Marathi/Hinglish calls, so
+# we no longer need the dedupe / collapse / regex-cleanup passes that were
+# previously layered on top of whisper-1 output.
+#
+# `gpt-4o-transcribe` only supports `response_format='json'` (no verbose_json,
+# no segments, no per-segment timestamps), so:
+#   - we cannot do segment-level dedupe (and we no longer need to)
+#   - we cannot read `duration` from the response → we read it from the audio
+#     file itself via `mutagen` if available, otherwise call_duration stays
+#     null and the existing value (if any) is preserved
+TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe'
 
 
-# ---------------------------------------------------------------------------
-# Whisper hallucination cleanup
-# ---------------------------------------------------------------------------
-def _dedupe_segments(segments):
+def _audio_duration_seconds(audio_bytes: bytes, file_name: str) -> int:
     """
-    Whisper-1 frequently loops on a phrase when it hits silence or unintelligible
-    audio (especially on Hindi/Marathi). Detect repeated consecutive segments by
-    text content and drop the duplicates.
+    Return audio duration in seconds, or 0 if it cannot be determined.
+    Uses `mutagen` if installed (pure-Python, supports m4a/mp3/ogg/wav/flac).
     """
-    if not segments:
-        return None
-    cleaned = []
-    last_text = None
-    repeat_run = 0
-    for seg in segments:
-        if hasattr(seg, 'text'):
-            text = getattr(seg, 'text', '') or ''
-        elif isinstance(seg, dict):
-            text = seg.get('text', '') or ''
-        else:
-            text = ''
-        text = text.strip()
-        if not text:
-            continue
-        # normalize for comparison: collapse whitespace, lowercase
-        norm = re.sub(r'\s+', ' ', text).strip().lower()
-        if last_text is not None and norm == last_text:
-            repeat_run += 1
-            if repeat_run >= 1:
-                continue
-        else:
-            repeat_run = 0
-        cleaned.append(text)
-        last_text = norm
-    return ' '.join(cleaned).strip()
-
-
-def _clean_whisper_text(text):
-    """
-    Best-effort cleanup of looping Whisper output when no segments are available
-    (or as a second-pass safety net). Removes any 15-200 char chunk that repeats
-    2+ times in a row. Works for Devanagari / Tamil / Latin scripts.
-    """
-    if not text:
-        return text
-
-    # Pass 1: collapse identical adjacent chunks (greedy, longest match wins).
-    # We try shrinking window sizes from long to short.
-    for window in (200, 120, 80, 50, 25):
-        pattern = re.compile(
-            r'(.{' + str(window) + r',' + str(window * 2) + r'}?)(?:\s*\1){1,}',
-            re.UNICODE | re.DOTALL,
-        )
-        prev = None
-        while prev != text:
-            prev = text
-            text = pattern.sub(r'\1', text)
-
-    # Pass 2: split on Devanagari/Latin sentence-ish separators and drop adjacent
-    # duplicate sentences (case-insensitive after collapsing whitespace).
-    parts = re.split(r'(?<=[।\.\?\!])\s+|\s{2,}', text)
-    out = []
-    last_norm = None
-    for p in parts:
-        p_strip = p.strip()
-        if not p_strip:
-            continue
-        norm = re.sub(r'\s+', ' ', p_strip).lower()
-        if norm == last_norm:
-            continue
-        out.append(p_strip)
-        last_norm = norm
-    return ' '.join(out).strip()
-
-_NON_ASCII_RE = re.compile(r'[^\x00-\x7f]')
-
-
-def _looks_non_english(text: str) -> bool:
-    """Heuristic: >5% non-ASCII chars → assume the audio is in a non-English language
-    (Devanagari, Tamil, Cyrillic etc.) and route through translation endpoint."""
-    if not text:
-        return False
-    non_ascii = len(_NON_ASCII_RE.findall(text))
-    return (non_ascii / max(len(text), 1)) > 0.05
+    try:
+        from mutagen import File as MutagenFile  # type: ignore
+        import io
+        f = MutagenFile(io.BytesIO(audio_bytes))
+        if f is not None and getattr(f, 'info', None) is not None:
+            return int(round(float(f.info.length)))
+    except ImportError:
+        logger.info('mutagen is not installed — call_duration will be left untouched for new transcriptions')
+    except Exception as e:
+        logger.warning(f'Failed to read audio duration for {file_name}: {e}')
+    return 0
 
 
 DIARIZE_PROMPT = """You are processing a transcription of a sales phone call between an AskAyurveda operator \
@@ -242,64 +180,61 @@ def transcribe_audio(contact):
 
             audio_bytes = audio_field.read()
 
-            # Step 1: native transcription in source language (verbose_json gives us
-            # per-segment data we use to remove Whisper hallucination loops).
+            # Step 1: transcribe with gpt-4o-transcribe. The model handles
+            # mixed-language input (Hinglish, Marathi, Tamil, Russian, etc.)
+            # natively and does NOT loop on long audio the way whisper-1 does.
+            # Output is the raw transcript in the source language(s) — we hand
+            # it directly to the diarizer which translates to English in the
+            # same pass.
             transcribe_resp = client.audio.transcriptions.create(
-                model='whisper-1',
+                model=TRANSCRIBE_MODEL,
                 file=(file_name, audio_bytes),
-                response_format='verbose_json',
-                timestamp_granularities=['segment'],
-                temperature=0,
+                response_format='json',
             )
-            source_text   = (transcribe_resp.text or '').strip()
-            duration_secs = int(getattr(transcribe_resp, 'duration', 0) or 0)
-            segments      = getattr(transcribe_resp, 'segments', None) or []
+            source_text = (transcribe_resp.text or '').strip()
 
-            deduped = _dedupe_segments(segments)
-            if deduped and len(deduped) >= len(source_text) * 0.5:
-                source_text = deduped
-            source_text = _clean_whisper_text(source_text)
+            # Duration from the audio file itself — gpt-4o-transcribe does not
+            # return it. If mutagen is unavailable we leave call_duration alone
+            # so the existing value is preserved.
+            duration_secs = _audio_duration_seconds(audio_bytes, file_name)
 
-            # Step 2: if the audio is non-English, ask Whisper to TRANSLATE to English
-            # natively (this is the dedicated whisper-1 translation endpoint). For
-            # already-English calls translation is a no-op.
-            english_text = source_text
-            if _looks_non_english(source_text):
-                try:
-                    audio_field.seek(0)
-                    translate_resp = client.audio.translations.create(
-                        model='whisper-1',
-                        file=(file_name, audio_field.read()),
-                        response_format='verbose_json',
-                        temperature=0,
-                    )
-                    en_raw      = (translate_resp.text or '').strip()
-                    en_segments = getattr(translate_resp, 'segments', None) or []
-                    en_clean    = _dedupe_segments(en_segments) or en_raw
-                    en_clean    = _clean_whisper_text(en_clean)
-                    if en_clean and len(en_clean) > len(english_text) * 0.5:
-                        english_text = en_clean
-                except Exception as ex:
-                    logger.warning(f'Whisper translation failed for contact {contact.id}: {ex}')
+            logger.info(
+                'contact %s gpt-4o-transcribe: duration=%ss chars=%d',
+                contact.id, duration_secs, len(source_text),
+            )
 
-            # Step 3: GPT-4o-mini diarization (Operator/Partner labels). Feed it the
-            # English text so it does not waste budget on translation again.
-            raw_text = english_text
-            diarized = _diarize_with_openai(english_text)
+            # Step 2: GPT-4o-mini diarization which also does the English
+            # translation in one pass.
+            diarized = _diarize_with_openai(source_text)
 
             base_name   = os.path.splitext(file_name)[0]
             txt_content = ContentFile(diarized.encode('utf-8'), name=f'{base_name}_transcript.txt')
             contact.transcript_file.save(f'{base_name}_transcript.txt', txt_content, save=False)
 
-            contact.transcription        = raw_text
+            contact.transcription        = source_text
             contact.diarized_transcript  = diarized
-            contact.call_duration        = duration_secs if duration_secs > 0 else None
             contact.transcription_status = 'done'
             contact.summary_status       = 'pending'
-            contact.save(update_fields=[
-                'transcription', 'diarized_transcript', 'call_duration',
+            contact.transcription_last_error = (
+                f'OK: model={TRANSCRIBE_MODEL} '
+                f'duration={duration_secs}s '
+                f'chars={len(source_text)} '
+                f'diarized_chars={len(diarized or "")}'
+            )
+
+            update_fields = [
+                'transcription', 'diarized_transcript',
                 'transcript_file', 'transcription_status', 'summary_status',
-            ])
+                'transcription_last_error',
+            ]
+            # Only overwrite call_duration if we successfully measured it.
+            # Otherwise keep whatever was there before (likely set by an earlier
+            # whisper-1 transcription).
+            if duration_secs > 0:
+                contact.call_duration = duration_secs
+                update_fields.append('call_duration')
+
+            contact.save(update_fields=update_fields)
 
             logger.info(f'Transcription + diarization done for contact {contact.id} ({duration_secs}s)')
 
