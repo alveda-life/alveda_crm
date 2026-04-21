@@ -16,7 +16,8 @@ RETRY_DELAYS       = [5, 15, 30]
 # and even leaks prompt phrases into the transcript. We therefore use NO topic prompt
 # and instead rely on:
 #   - the `translations` endpoint which natively converts any input language → English
-#   - segment-level dedup + regex cleanup to neutralise loops
+#   - segment-level dedup (`_dedupe_segments`) to neutralise Whisper loops without
+#     touching the body of the transcript with regex
 #   - GPT-4o-mini second pass for diarization (Operator/Partner labelling)
 
 
@@ -57,42 +58,13 @@ def _dedupe_segments(segments):
     return ' '.join(cleaned).strip()
 
 
-def _clean_whisper_text(text):
-    """
-    Best-effort cleanup of looping Whisper output when no segments are available
-    (or as a second-pass safety net). Removes any 15-200 char chunk that repeats
-    2+ times in a row. Works for Devanagari / Tamil / Latin scripts.
-    """
-    if not text:
-        return text
-
-    # Pass 1: collapse identical adjacent chunks (greedy, longest match wins).
-    # We try shrinking window sizes from long to short.
-    for window in (200, 120, 80, 50, 25):
-        pattern = re.compile(
-            r'(.{' + str(window) + r',' + str(window * 2) + r'}?)(?:\s*\1){1,}',
-            re.UNICODE | re.DOTALL,
-        )
-        prev = None
-        while prev != text:
-            prev = text
-            text = pattern.sub(r'\1', text)
-
-    # Pass 2: split on Devanagari/Latin sentence-ish separators and drop adjacent
-    # duplicate sentences (case-insensitive after collapsing whitespace).
-    parts = re.split(r'(?<=[।\.\?\!])\s+|\s{2,}', text)
-    out = []
-    last_norm = None
-    for p in parts:
-        p_strip = p.strip()
-        if not p_strip:
-            continue
-        norm = re.sub(r'\s+', ' ', p_strip).lower()
-        if norm == last_norm:
-            continue
-        out.append(p_strip)
-        last_norm = norm
-    return ' '.join(out).strip()
+# NOTE: there used to be a `_clean_whisper_text` regex pass here as a second
+# safety net on top of `_dedupe_segments`. It was REMOVED on 2026-04-21 because
+# on Hinglish calls (mixed Hindi/Marathi + English) it treated natural spoken
+# repetitions ("achha achha", "haan ji haan ji", operator mirroring partner)
+# as Whisper hallucination loops and ate 4 of 5 minutes of dialogue. The
+# segment-level `_dedupe_segments` is enough — it only collapses adjacent
+# Whisper segments with identical text, using boundaries Whisper itself drew.
 
 _NON_ASCII_RE = re.compile(r'[^\x00-\x7f]')
 
@@ -254,11 +226,16 @@ def transcribe_audio(contact):
             source_text   = (transcribe_resp.text or '').strip()
             duration_secs = int(getattr(transcribe_resp, 'duration', 0) or 0)
             segments      = getattr(transcribe_resp, 'segments', None) or []
+            raw_full      = source_text
 
             deduped = _dedupe_segments(segments)
-            if deduped and len(deduped) >= len(source_text) * 0.5:
+            if deduped:
                 source_text = deduped
-            source_text = _clean_whisper_text(source_text)
+
+            logger.info(
+                'contact %s whisper transcribe: duration=%ss raw_chars=%d deduped_chars=%d final_chars=%d',
+                contact.id, duration_secs, len(raw_full), len(deduped or ''), len(source_text),
+            )
 
             # Step 2: if the audio is non-English, ask Whisper to TRANSLATE to English
             # natively (this is the dedicated whisper-1 translation endpoint). For
@@ -276,9 +253,12 @@ def transcribe_audio(contact):
                     en_raw      = (translate_resp.text or '').strip()
                     en_segments = getattr(translate_resp, 'segments', None) or []
                     en_clean    = _dedupe_segments(en_segments) or en_raw
-                    en_clean    = _clean_whisper_text(en_clean)
-                    if en_clean and len(en_clean) > len(english_text) * 0.5:
+                    if en_clean:
                         english_text = en_clean
+                    logger.info(
+                        'contact %s whisper translate: raw_chars=%d final_chars=%d',
+                        contact.id, len(en_raw), len(english_text),
+                    )
                 except Exception as ex:
                     logger.warning(f'Whisper translation failed for contact {contact.id}: {ex}')
 
@@ -296,9 +276,16 @@ def transcribe_audio(contact):
             contact.call_duration        = duration_secs if duration_secs > 0 else None
             contact.transcription_status = 'done'
             contact.summary_status       = 'pending'
+            contact.transcription_last_error = (
+                f'OK: duration={duration_secs}s '
+                f'raw_chars={len(raw_full)} '
+                f'deduped_chars={len(deduped or "")} '
+                f'final_chars={len(raw_text)}'
+            )
             contact.save(update_fields=[
                 'transcription', 'diarized_transcript', 'call_duration',
                 'transcript_file', 'transcription_status', 'summary_status',
+                'transcription_last_error',
             ])
 
             logger.info(f'Transcription + diarization done for contact {contact.id} ({duration_secs}s)')
