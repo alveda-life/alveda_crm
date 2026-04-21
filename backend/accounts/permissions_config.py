@@ -27,7 +27,7 @@ ROLE_DEFAULTS = {
         'operators':            {'view': _T},
     },
     'operator': {
-        'partners':             {'view': _T, 'create': _T, 'edit': _T, 'delete': _F},
+        'partners':             {'view': _T, 'create': _F, 'edit': _F, 'delete': _F},
         'producers_onboarding': {'view': _F, 'create': _F, 'edit': _F, 'delete': _F},
         'producers_support':    {'view': _F, 'create': _F, 'edit': _F, 'delete': _F},
         'tasks':                {'view': _T, 'create': _T, 'edit': _T, 'delete': _F},

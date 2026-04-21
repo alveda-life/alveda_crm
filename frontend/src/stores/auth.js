@@ -12,6 +12,8 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthenticated: (state) => !!state.accessToken,
     isAdmin:         (state) => state.user?.role === 'admin',
+    isOperator:      (state) => state.user?.is_restricted_operator === true
+                                || state.user?.role === 'operator',
     fullName:        (state) => state.user?.full_name || state.user?.username || '',
 
     // Section-level helpers

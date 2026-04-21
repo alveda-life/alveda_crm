@@ -17,38 +17,57 @@
           <q-menu>
             <q-list dense style="min-width:170px;">
               <q-item-label header class="text-caption">Assign to</q-item-label>
-              <q-item
-                v-for="user in users" :key="user.id"
-                clickable v-close-popup
-                :disable="user.id === partner.assigned_to"
-                @click.stop="$emit('assign', { partnerId: partner.id, userId: user.id, userDetail: user })"
-              >
-                <q-item-section avatar>
-                  <q-avatar size="22px" :color="user.id === partner.assigned_to ? 'primary' : 'grey-4'" text-color="white" style="font-size:10px;">
-                    {{ userInitials(user) }}
-                  </q-avatar>
-                </q-item-section>
-                <q-item-section>{{ user.full_name || user.username }}</q-item-section>
-                <q-item-section side v-if="user.id === partner.assigned_to">
-                  <q-icon name="check" size="14px" color="primary" />
-                </q-item-section>
-              </q-item>
-              <q-separator spaced />
-              <q-item-label header class="text-caption">Move to stage</q-item-label>
-              <q-item
-                v-for="stage in stageOptions" :key="stage.value"
-                clickable v-close-popup
-                :disable="stage.value === partner.stage"
-                @click.stop="$emit('stage-change', { partnerId: partner.id, newStage: stage.value })"
-              >
-                <q-item-section avatar>
-                  <div :style="`width:8px;height:8px;border-radius:50%;background:${stage.color}`" />
-                </q-item-section>
-                <q-item-section>{{ stage.label }}</q-item-section>
-                <q-item-section side v-if="stage.value === partner.stage">
-                  <q-icon name="check" size="14px" color="primary" />
-                </q-item-section>
-              </q-item>
+              <template v-if="authStore.isOperator">
+                <q-item
+                  clickable v-close-popup
+                  :disable="authStore.user?.id === partner.assigned_to"
+                  @click.stop="$emit('assign', { partnerId: partner.id, userId: authStore.user.id, userDetail: authStore.user })"
+                >
+                  <q-item-section avatar>
+                    <q-avatar size="22px" color="primary" text-color="white" style="font-size:10px;">
+                      {{ userInitials(authStore.user || {}) }}
+                    </q-avatar>
+                  </q-item-section>
+                  <q-item-section>Assign to me</q-item-section>
+                  <q-item-section side v-if="authStore.user?.id === partner.assigned_to">
+                    <q-icon name="check" size="14px" color="primary" />
+                  </q-item-section>
+                </q-item>
+              </template>
+              <template v-else>
+                <q-item
+                  v-for="user in users" :key="user.id"
+                  clickable v-close-popup
+                  :disable="user.id === partner.assigned_to"
+                  @click.stop="$emit('assign', { partnerId: partner.id, userId: user.id, userDetail: user })"
+                >
+                  <q-item-section avatar>
+                    <q-avatar size="22px" :color="user.id === partner.assigned_to ? 'primary' : 'grey-4'" text-color="white" style="font-size:10px;">
+                      {{ userInitials(user) }}
+                    </q-avatar>
+                  </q-item-section>
+                  <q-item-section>{{ user.full_name || user.username }}</q-item-section>
+                  <q-item-section side v-if="user.id === partner.assigned_to">
+                    <q-icon name="check" size="14px" color="primary" />
+                  </q-item-section>
+                </q-item>
+                <q-separator spaced />
+                <q-item-label header class="text-caption">Move to stage</q-item-label>
+                <q-item
+                  v-for="stage in stageOptions" :key="stage.value"
+                  clickable v-close-popup
+                  :disable="stage.value === partner.stage"
+                  @click.stop="$emit('stage-change', { partnerId: partner.id, newStage: stage.value })"
+                >
+                  <q-item-section avatar>
+                    <div :style="`width:8px;height:8px;border-radius:50%;background:${stage.color}`" />
+                  </q-item-section>
+                  <q-item-section>{{ stage.label }}</q-item-section>
+                  <q-item-section side v-if="stage.value === partner.stage">
+                    <q-icon name="check" size="14px" color="primary" />
+                  </q-item-section>
+                </q-item>
+              </template>
             </q-list>
           </q-menu>
         </q-btn>
@@ -136,7 +155,10 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useAuthStore } from 'src/stores/auth'
 import { nameColor, opColor } from 'src/utils/partnerColors'
+
+const authStore = useAuthStore()
 
 const props = defineProps({
   partner: { type: Object, required: true },

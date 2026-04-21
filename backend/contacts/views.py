@@ -38,15 +38,35 @@ def _transcribe_in_background(contact_id):
         close_old_connections()
 
 
+def _is_operator(user):
+    return getattr(user, 'role', '') == 'operator' and not user.is_staff
+
+
 class ContactViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ContactSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def destroy(self, request, *args, **kwargs):
-        if not RolePermission.has_perm(request.user, 'partners', 'delete'):
+        instance = self.get_object()
+        if _is_operator(request.user):
+            if instance.created_by_id != request.user.id:
+                return Response(
+                    {'detail': 'Operators can only delete their own activity records.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        elif not RolePermission.has_perm(request.user, 'partners', 'delete'):
             return Response({'detail': 'You do not have permission to delete.'}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if _is_operator(request.user) and instance.created_by_id != request.user.id:
+            return Response(
+                {'detail': 'Operators can only edit their own activity records.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().update(request, *args, **kwargs)
 
     def get_queryset(self):
         from django.db.models import Count, Q, OuterRef, Subquery, IntegerField
@@ -95,6 +115,8 @@ class ContactViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='retry-transcription')
     def retry_transcription(self, request, pk=None):
         contact = self.get_object()
+        if _is_operator(request.user) and contact.created_by_id != request.user.id:
+            return Response({'error': 'Forbidden'}, status=403)
         if not contact.audio_file:
             return Response({'error': 'No audio file attached.'}, status=400)
         contact.transcription_status = 'pending'
@@ -109,6 +131,8 @@ class ContactViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='retry-summary')
     def retry_summary(self, request, pk=None):
         contact = self.get_object()
+        if _is_operator(request.user) and contact.created_by_id != request.user.id:
+            return Response({'error': 'Forbidden'}, status=403)
         if not contact.transcription:
             return Response({'error': 'No transcription available.'}, status=400)
         contact.summary_status = 'pending'

@@ -16,7 +16,7 @@
           </q-breadcrumbs>
         </div>
         <div class="row q-gutter-sm">
-          <q-btn flat icon="edit" label="Edit" color="grey-7" @click="showEditDialog = true" />
+          <q-btn v-if="!isOperator" flat icon="edit" label="Edit" color="grey-7" @click="showEditDialog = true" />
           <q-btn unelevated icon="add_comment" label="Add Record" color="primary"
             @click="showContactDialog = true" style="border-radius:8px;" />
         </div>
@@ -52,7 +52,10 @@
 
               <!-- Status -->
               <div class="q-mb-sm">
-                <div class="field-label q-mb-xs">Status</div>
+                <div class="field-label q-mb-xs">
+                  Status
+                  <q-icon v-if="isOperator && !hasOwnActivity" name="lock" size="11px" color="grey-5" />
+                </div>
                 <div class="row q-gutter-xs">
                   <q-btn
                     v-for="s in statusOptions" :key="s.value"
@@ -62,9 +65,14 @@
                     size="sm"
                     :label="s.label"
                     dense
+                    :disable="isOperator && !hasOwnActivity"
                     style="border-radius:6px;"
                     @click="changeStatus(s.value)"
-                  />
+                  >
+                    <q-tooltip v-if="isOperator && !hasOwnActivity">
+                      Add an Activity record before changing status
+                    </q-tooltip>
+                  </q-btn>
                 </div>
               </div>
 
@@ -74,15 +82,21 @@
               <div class="q-mb-sm">
                 <div class="field-label q-mb-xs">
                   <q-icon name="event" size="12px" /> Follow-up Date
+                  <q-icon v-if="isOperator && !hasOwnActivity" name="lock" size="11px" color="grey-5" />
                 </div>
                 <q-input
                   :model-value="partner.control_date"
                   outlined dense
                   type="date"
                   :max="maxControlDate"
+                  :readonly="isOperator && !hasOwnActivity"
                   :class="isOverdue ? 'overdue-date' : ''"
                   @update:model-value="saveControlDate"
-                />
+                >
+                  <q-tooltip v-if="isOperator && !hasOwnActivity">
+                    Add an Activity record before changing follow-up date
+                  </q-tooltip>
+                </q-input>
                 <div v-if="isOverdue" class="text-caption text-negative q-mt-xs">
                   <q-icon name="warning" size="12px" /> Overdue
                 </div>
@@ -92,14 +106,22 @@
 
               <!-- Funnel Stage -->
               <div class="q-mb-md">
-                <div class="field-label q-mb-xs">Funnel Stage</div>
+                <div class="field-label q-mb-xs">
+                  Funnel Stage
+                  <q-icon v-if="isOperator" name="lock" size="11px" color="grey-5" />
+                </div>
                 <q-select
                   :model-value="partner.stage"
                   :options="stageOptions"
                   emit-value map-options
                   outlined dense
+                  :disable="isOperator"
                   @update:model-value="changeStage"
-                />
+                >
+                  <q-tooltip v-if="isOperator">
+                    Operators cannot change the funnel stage
+                  </q-tooltip>
+                </q-select>
               </div>
 
               <div class="info-row">
@@ -138,23 +160,42 @@
                   <q-menu>
                     <q-list dense style="min-width:180px;">
                       <q-item-label header class="text-caption">Assign operator</q-item-label>
-                      <q-item
-                        v-for="user in store.users"
-                        :key="user.id"
-                        clickable v-close-popup
-                        :disable="user.id === partner.assigned_to"
-                        @click="assignOperator(user)"
-                      >
-                        <q-item-section avatar>
-                          <q-avatar size="26px" :color="user.id === partner.assigned_to ? 'primary' : 'grey-4'" text-color="white" style="font-size:10px;">
-                            {{ (user.full_name || user.username).split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2) }}
-                          </q-avatar>
-                        </q-item-section>
-                        <q-item-section>{{ user.full_name || user.username }}</q-item-section>
-                        <q-item-section side v-if="user.id === partner.assigned_to">
-                          <q-icon name="check" size="14px" color="primary" />
-                        </q-item-section>
-                      </q-item>
+                      <template v-if="isOperator">
+                        <q-item
+                          clickable v-close-popup
+                          :disable="authStore.user?.id === partner.assigned_to"
+                          @click="assignOperator(authStore.user)"
+                        >
+                          <q-item-section avatar>
+                            <q-avatar size="26px" color="primary" text-color="white" style="font-size:10px;">
+                              {{ (authStore.user?.full_name || authStore.user?.username || '').split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2) }}
+                            </q-avatar>
+                          </q-item-section>
+                          <q-item-section>Assign to me</q-item-section>
+                          <q-item-section side v-if="authStore.user?.id === partner.assigned_to">
+                            <q-icon name="check" size="14px" color="primary" />
+                          </q-item-section>
+                        </q-item>
+                      </template>
+                      <template v-else>
+                        <q-item
+                          v-for="user in store.users"
+                          :key="user.id"
+                          clickable v-close-popup
+                          :disable="user.id === partner.assigned_to"
+                          @click="assignOperator(user)"
+                        >
+                          <q-item-section avatar>
+                            <q-avatar size="26px" :color="user.id === partner.assigned_to ? 'primary' : 'grey-4'" text-color="white" style="font-size:10px;">
+                              {{ (user.full_name || user.username).split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2) }}
+                            </q-avatar>
+                          </q-item-section>
+                          <q-item-section>{{ user.full_name || user.username }}</q-item-section>
+                          <q-item-section side v-if="user.id === partner.assigned_to">
+                            <q-icon name="check" size="14px" color="primary" />
+                          </q-item-section>
+                        </q-item>
+                      </template>
                     </q-list>
                   </q-menu>
                 </div>
@@ -181,7 +222,7 @@
               <!-- Profile info — inline editable -->
               <div class="row items-center justify-between q-mb-sm">
                 <div class="field-label">Profile Info</div>
-                <q-btn v-if="!editProfile" flat dense round icon="edit" size="xs" color="grey-5"
+                <q-btn v-if="!editProfile && !profileFullyLockedForOperator" flat dense round icon="edit" size="xs" color="grey-5"
                   @click="startEditProfile" />
               </div>
 
@@ -225,16 +266,21 @@
               </div>
 
               <div v-else class="q-mt-xs">
+                <div v-if="isOperator" class="text-caption text-grey-7 q-mb-sm" style="background:#FFF8E1; border-left:3px solid #FFB300; padding:6px 10px; border-radius:4px;">
+                  <q-icon name="info" size="13px" /> You can fill empty fields once. Filled fields cannot be changed.
+                </div>
                 <div class="row q-col-gutter-sm">
                   <div class="col-6">
                     <div class="field-label q-mb-xs">Gender</div>
                     <q-select v-model="profileForm.gender" :options="genderOptions"
-                      emit-value map-options outlined dense clearable placeholder="—" />
+                      emit-value map-options outlined dense :clearable="!isProfileFieldLocked('gender')" placeholder="—"
+                      :readonly="isProfileFieldLocked('gender')" :disable="isProfileFieldLocked('gender')" />
                   </div>
                   <div class="col-6">
                     <div class="field-label q-mb-xs">Experience (yrs)</div>
                     <q-input v-model.number="profileForm.experience_years" outlined dense
-                      type="number" min="0" max="60" placeholder="—" />
+                      type="number" min="0" max="60" placeholder="—"
+                      :readonly="isProfileFieldLocked('experience_years')" :disable="isProfileFieldLocked('experience_years')" />
                   </div>
                   <div class="col-6">
                     <div class="field-label q-mb-xs">State</div>
@@ -243,8 +289,9 @@
                       :options="profileStateOptions"
                       use-input input-debounce="0"
                       @filter="filterProfileStates"
-                      outlined dense clearable
+                      outlined dense :clearable="!isProfileFieldLocked('state')"
                       placeholder="Search..."
+                      :readonly="isProfileFieldLocked('state')" :disable="isProfileFieldLocked('state')"
                       @update:model-value="profileForm.city = ''"
                     />
                   </div>
@@ -255,8 +302,9 @@
                       :options="profileCityOptions"
                       use-input input-debounce="0"
                       @filter="filterProfileCities"
-                      outlined dense clearable
+                      outlined dense :clearable="!isProfileFieldLocked('city')"
                       placeholder="Search..."
+                      :readonly="isProfileFieldLocked('city')" :disable="isProfileFieldLocked('city')"
                     />
                   </div>
                 </div>
@@ -339,8 +387,15 @@
           <q-card flat bordered style="border-radius:12px;">
             <q-card-section>
               <div class="row items-center justify-between q-mb-sm">
-                <div class="text-subtitle2 text-weight-bold">Internal Notes</div>
-                <q-btn flat dense icon="edit" size="xs" color="grey-6" @click="editNotes = !editNotes" />
+                <div class="text-subtitle2 text-weight-bold">
+                  Internal Notes
+                  <q-icon v-if="isOperator && !hasOwnActivity" name="lock" size="11px" color="grey-5" />
+                </div>
+                <q-btn v-if="!isOperator || hasOwnActivity" flat dense icon="edit" size="xs" color="grey-6" @click="editNotes = !editNotes">
+                  <q-tooltip v-if="isOperator && !hasOwnActivity">
+                    Add an Activity record before editing notes
+                  </q-tooltip>
+                </q-btn>
               </div>
               <q-input v-if="editNotes" v-model="notesValue" type="textarea" outlined dense rows="4"
                 autogrow placeholder="Add notes..." />
@@ -390,6 +445,7 @@
                   <q-checkbox
                     :model-value="task.status === 'done'"
                     dense color="green-6"
+                    :disable="!canToggleTaskDone(task)"
                     @update:model-value="toggleTaskDone(task)"
                     @click.stop
                     style="flex-shrink:0"
@@ -433,8 +489,8 @@
 
                   <!-- Edit/delete -->
                   <div class="row" style="flex-shrink:0" @click.stop>
-                    <q-btn flat round dense icon="edit" size="xs" color="grey-5" @click="openTaskEdit(task)" />
-                    <q-btn v-if="authStore.isAdmin" flat round dense icon="delete" size="xs" color="grey-4" @click="deleteTask(task)" />
+                    <q-btn v-if="canEditTask(task)" flat round dense icon="edit" size="xs" color="grey-5" @click="openTaskEdit(task)" />
+                    <q-btn v-if="canDeleteTask(task)" flat round dense icon="delete" size="xs" color="grey-4" @click="deleteTask(task)" />
                   </div>
                 </div>
               </div>
@@ -490,8 +546,8 @@
                         </q-chip>
                       </div>
                       <div class="row q-gutter-xs">
-                        <q-btn flat round dense icon="edit" size="xs" color="grey-6" @click="editContact(contact)" />
-                        <q-btn v-if="authStore.isAdmin" flat round dense icon="delete" size="xs" color="negative" @click="deleteContact(contact)" />
+                        <q-btn v-if="canEditContact(contact)" flat round dense icon="edit" size="xs" color="grey-6" @click="editContact(contact)" />
+                        <q-btn v-if="canDeleteContact(contact)" flat round dense icon="delete" size="xs" color="negative" @click="deleteContact(contact)" />
                       </div>
                     </div>
 
@@ -708,6 +764,58 @@ const detailTaskObj   = ref(null)
 const openTasksCount = computed(() =>
   tasks.value.filter(t => t.status === 'open' || t.status === 'in_progress').length
 )
+
+// ── Operator restriction helpers ────────────────────────────────────
+const isOperator = computed(() => authStore.isOperator)
+
+const hasOwnActivity = computed(() => {
+  if (!authStore.user?.id) return false
+  if (partner.value?.current_user_has_activity) return true
+  return contacts.value.some(c => c.created_by_detail?.id === authStore.user.id)
+})
+
+const profileFullyLockedForOperator = computed(() => {
+  if (!isOperator.value || !partner.value) return false
+  return !!partner.value.gender
+    && partner.value.experience_years != null
+    && !!partner.value.city
+    && !!partner.value.state
+})
+
+function isProfileFieldLocked(field) {
+  if (!isOperator.value || !partner.value) return false
+  if (field === 'experience_years') return partner.value.experience_years != null
+  return !!partner.value[field]
+}
+
+function isOwnTask(task) {
+  return task?.created_by_detail?.id === authStore.user?.id
+}
+function isAssignedTask(task) {
+  return task?.assigned_to === authStore.user?.id
+}
+function canEditTask(task) {
+  if (!isOperator.value) return true
+  return isOwnTask(task)
+}
+function canDeleteTask(task) {
+  if (authStore.isAdmin) return true
+  if (!isOperator.value) return false
+  return isOwnTask(task)
+}
+function canToggleTaskDone(task) {
+  if (!isOperator.value) return true
+  return isOwnTask(task) || isAssignedTask(task)
+}
+function canEditContact(contact) {
+  if (!isOperator.value) return true
+  return contact?.created_by_detail?.id === authStore.user?.id
+}
+function canDeleteContact(contact) {
+  if (authStore.isAdmin) return true
+  if (!isOperator.value) return false
+  return contact?.created_by_detail?.id === authStore.user?.id
+}
 
 async function loadTasks() {
   tasksLoading.value = true

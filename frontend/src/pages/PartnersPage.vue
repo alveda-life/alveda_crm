@@ -56,7 +56,7 @@
 
       <q-space />
 
-      <q-btn color="primary" icon="add" label="Add Partner" unelevated
+      <q-btn v-if="!authStore.isOperator" color="primary" icon="add" label="Add Partner" unelevated
         @click="showAddDialog = true" style="border-radius:8px;" />
     </div>
 

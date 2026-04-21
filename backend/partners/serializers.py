@@ -15,6 +15,7 @@ class PartnerListSerializer(serializers.ModelSerializer):
     category_display = serializers.CharField(source='get_category_display', read_only=True)
 
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
+    current_user_has_activity = serializers.SerializerMethodField()
 
     class Meta:
         model = Partner
@@ -29,8 +30,20 @@ class PartnerListSerializer(serializers.ModelSerializer):
             'assigned_to', 'assigned_to_detail', 'notes',
             'whatsapp_added',
             'contacts_count', 'missed_calls_count', 'last_contact_date',
+            'current_user_has_activity',
             'created_at', 'updated_at',
         ]
+
+    def get_current_user_has_activity(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        # Avoid an extra query when prefetched annotation is present
+        cached = getattr(obj, '_current_user_has_activity', None)
+        if cached is not None:
+            return bool(cached)
+        from contacts.models import Contact
+        return Contact.objects.filter(partner=obj, created_by=request.user).exists()
 
 
 class PartnerWriteSerializer(serializers.ModelSerializer):

@@ -73,6 +73,7 @@
 
       <!-- Add partner button -->
       <q-btn
+        v-if="!authStore.isOperator"
         color="primary"
         icon="add"
         label="Add Partner"
@@ -132,6 +133,7 @@
           group="partners"
           item-key="id"
           :animation="150"
+          :disabled="authStore.isOperator"
           ghost-class="drag-ghost"
           chosen-class="drag-chosen"
           @add="(evt) => onDragEnd(evt, key)"

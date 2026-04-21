@@ -32,12 +32,16 @@ class UserSerializer(serializers.ModelSerializer):
 
 class MeSerializer(UserSerializer):
     permissions = serializers.SerializerMethodField()
+    is_restricted_operator = serializers.SerializerMethodField()
 
     class Meta(UserSerializer.Meta):
-        fields = UserSerializer.Meta.fields + ['permissions']
+        fields = UserSerializer.Meta.fields + ['permissions', 'is_restricted_operator']
 
     def get_permissions(self, obj):
         return RolePermission.get_for_role(obj.role)
+
+    def get_is_restricted_operator(self, obj):
+        return obj.role == 'operator' and not obj.is_staff
 
 
 class RolePermissionSerializer(serializers.ModelSerializer):

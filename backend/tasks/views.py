@@ -10,6 +10,10 @@ from .models import Task, TaskComment
 from .serializers import TaskSerializer, TaskCommentSerializer
 
 
+def _is_operator(user):
+    return getattr(user, 'role', '') == 'operator' and not user.is_staff
+
+
 class TaskViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class   = TaskSerializer
@@ -20,9 +24,32 @@ class TaskViewSet(viewsets.ModelViewSet):
     ordering           = ['due_date', '-created_at']
 
     def destroy(self, request, *args, **kwargs):
-        if not RolePermission.has_perm(request.user, 'tasks', 'delete'):
+        instance = self.get_object()
+        if _is_operator(request.user):
+            if instance.created_by_id != request.user.id:
+                return Response(
+                    {'detail': 'Operators can only delete tasks they created.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        elif not RolePermission.has_perm(request.user, 'tasks', 'delete'):
             return Response({'detail': 'You do not have permission to delete.'}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if _is_operator(request.user):
+            is_creator = instance.created_by_id == request.user.id
+            is_assignee = instance.assigned_to_id == request.user.id
+            if not is_creator:
+                # Non-creator operators can only toggle the status of tasks
+                # assigned to them, nothing else.
+                submitted = set(request.data.keys())
+                if not is_assignee or submitted - {'status'}:
+                    return Response(
+                        {'detail': 'Operators can only edit tasks they created.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+        return super().update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

@@ -8,8 +8,59 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from accounts.models import RolePermission
+from contacts.models import Contact
 from .models import Partner
 from .serializers import PartnerListSerializer, PartnerWriteSerializer
+
+
+OPERATOR_ALLOWED_FIELDS = {
+    'assigned_to',
+    'whatsapp_added',
+    'gender', 'experience_years', 'city', 'state',
+    'status', 'control_date', 'notes',
+}
+OPERATOR_PROFILE_FIELDS = {'gender', 'experience_years', 'city', 'state'}
+OPERATOR_ACTIVITY_GATED_FIELDS = {'status', 'control_date', 'notes'}
+
+
+def _is_operator(user):
+    return getattr(user, 'role', '') == 'operator' and not user.is_staff
+
+
+def _operator_validate_partner_patch(user, instance, data):
+    """Return (allowed: bool, message: str|None) for an operator partial update."""
+    submitted = set(data.keys())
+
+    extra = submitted - OPERATOR_ALLOWED_FIELDS
+    if extra:
+        return False, f"Operators cannot edit fields: {', '.join(sorted(extra))}."
+
+    if 'assigned_to' in submitted:
+        try:
+            assigned_id = int(data['assigned_to']) if data['assigned_to'] is not None else None
+        except (TypeError, ValueError):
+            return False, 'Invalid assigned_to value.'
+        if assigned_id != user.id:
+            return False, 'Operators can only assign cards to themselves.'
+
+    profile_changes = submitted & OPERATOR_PROFILE_FIELDS
+    for field in profile_changes:
+        current = getattr(instance, field, None)
+        if field == 'experience_years':
+            is_empty = current is None
+        else:
+            is_empty = not current
+        if not is_empty:
+            return False, f'Profile field "{field}" is already filled and cannot be changed.'
+
+    if submitted & OPERATOR_ACTIVITY_GATED_FIELDS:
+        has_own_activity = Contact.objects.filter(
+            partner=instance, created_by=user
+        ).exists()
+        if not has_own_activity:
+            return False, 'Add an Activity record before changing status, follow-up date or notes.'
+
+    return True, None
 
 
 class PartnerViewSet(viewsets.ModelViewSet):
@@ -60,29 +111,46 @@ class PartnerViewSet(viewsets.ModelViewSet):
         """Re-fetch a single partner through the annotated queryset."""
         return self.get_queryset().get(pk=pk)
 
+    def _serialize(self, instance, request, **kwargs):
+        return PartnerListSerializer(instance, context={'request': request}, **kwargs).data
+
     def create(self, request, *args, **kwargs):
+        if _is_operator(request.user):
+            return Response(
+                {'detail': 'Operators cannot create partners.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         partner = serializer.save()
-        return Response(PartnerListSerializer(self._annotated(partner.pk)).data, status=status.HTTP_201_CREATED)
+        return Response(self._serialize(self._annotated(partner.pk), request), status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        if _is_operator(request.user):
+            ok, msg = _operator_validate_partner_patch(request.user, instance, request.data)
+            if not ok:
+                return Response({'detail': msg}, status=status.HTTP_403_FORBIDDEN)
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         partner = serializer.save()
-        return Response(PartnerListSerializer(self._annotated(partner.pk)).data)
+        return Response(self._serialize(self._annotated(partner.pk), request))
 
     @action(detail=True, methods=['patch'], url_path='stage')
     def update_stage(self, request, pk=None):
+        if _is_operator(request.user):
+            return Response(
+                {'detail': 'Operators cannot change the funnel stage.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         partner = self.get_object()
         stage = request.data.get('stage')
         if stage not in dict(Partner.STAGE_CHOICES):
             return Response({'error': 'Invalid stage'}, status=status.HTTP_400_BAD_REQUEST)
         partner.stage = stage
         partner.save(update_fields=['stage', 'status', 'updated_at', 'stage_changed_at'])
-        return Response(PartnerListSerializer(self._annotated(partner.pk)).data)
+        return Response(self._serialize(self._annotated(partner.pk), request))
 
     DEAD_STAGES_SET = {Partner.STAGE_NO_ANSWER, Partner.STAGE_DECLINED, Partner.STAGE_NO_SALES}
     KANBAN_LIMIT_ACTIVE = 50
@@ -116,7 +184,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
             total = stage_qs.count()
             limit = self.KANBAN_LIMIT_DEAD if stage_key in self.DEAD_STAGES_SET else self.KANBAN_LIMIT_ACTIVE
             result[stage_key] = {
-                'items': PartnerListSerializer(stage_qs[:limit], many=True).data,
+                'items': PartnerListSerializer(stage_qs[:limit], many=True, context={'request': request}).data,
                 'total': total,
                 'has_more': total > limit,
             }
@@ -141,7 +209,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
             qs = qs.order_by(F('control_date').asc(nulls_last=True))
 
         total = qs.count()
-        items = PartnerListSerializer(qs[offset:offset + limit], many=True).data
+        items = PartnerListSerializer(qs[offset:offset + limit], many=True, context={'request': request}).data
         return Response({
             'items': items,
             'total': total,
