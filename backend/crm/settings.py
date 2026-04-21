@@ -12,6 +12,13 @@ ALLOWED_HOSTS = [
     if h.strip()
 ]
 
+# Origins that may send a safe CSRF token (scheme + host[:port]). Required for HTTPS / split setup.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip()
+    for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',')
+    if o.strip()
+]
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
