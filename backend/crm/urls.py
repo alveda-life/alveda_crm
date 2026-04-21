@@ -1,7 +1,7 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from django.conf import settings
-from django.conf.urls.static import static
+from django.views.static import serve as media_serve
 from rest_framework_simplejwt.views import TokenRefreshView
 from accounts.views import (
     CustomTokenObtainPairView, MeView, UserListView, UserDetailView,
@@ -31,4 +31,9 @@ urlpatterns = [
     path('api/', include('tasks.urls')),
     path('api/', include('reports.urls')),
     path('api/', include('producers.urls')),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # Media files (uploaded audio, transcripts) — served by Django at all times.
+    # Django's `static()` helper is a no-op when DEBUG=False, which broke audio
+    # playback in production. `serve` works regardless of DEBUG and supports
+    # HTTP Range requests, which is required for <audio> seeking in the browser.
+    re_path(r'^media/(?P<path>.*)$', media_serve, {'document_root': settings.MEDIA_ROOT}),
+]
