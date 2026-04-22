@@ -19,6 +19,7 @@ const routes = [
       { path: 'sales', component: () => import('pages/SalesPage.vue') },
       { path: 'operators', component: () => import('pages/OperatorStatsPage.vue') },
       { path: 'analytics', component: () => import('pages/AnalyticsPage.vue') },
+      { path: 'operator-activity', component: () => import('pages/OperatorActivityPage.vue') },
       { path: 'abandoned', component: () => import('pages/AbandonedPage.vue') },
       { path: 'tasks',    component: () => import('pages/TasksPage.vue') },
       { path: 'ai-report', component: () => import('pages/AiReportPage.vue') },

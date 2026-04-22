@@ -2,7 +2,7 @@
 
 module.exports = function (/* ctx */) {
   return {
-    boot: ['axios'],
+    boot: ['axios', 'activity'],
 
     css: ['app.scss'],
 

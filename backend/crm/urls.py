@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/', include('tasks.urls')),
     path('api/', include('reports.urls')),
     path('api/', include('producers.urls')),
+    path('api/activity/', include('activity.urls')),
     # Media files (uploaded audio, transcripts) — served by Django at all times.
     # Django's `static()` helper is a no-op when DEBUG=False, which broke audio
     # playback in production. `serve` works regardless of DEBUG and supports

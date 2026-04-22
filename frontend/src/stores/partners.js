@@ -1,5 +1,10 @@
 import { defineStore } from 'pinia'
 import { api } from 'boot/axios'
+import { getActivityTracker } from 'src/composables/useActivityTracker'
+
+function trackSafe (eventType, payload) {
+  try { getActivityTracker().track(eventType, payload) } catch { /* best-effort */ }
+}
 
 export const usePartnersStore = defineStore('partners', {
   state: () => ({
@@ -90,6 +95,11 @@ export const usePartnersStore = defineStore('partners', {
       try {
         const res = await api.get(`/partners/${id}/`)
         this.currentPartner = res.data
+        trackSafe('partner_open', {
+          object_type: 'partner',
+          object_id:   id,
+          metadata:    { name: res.data?.name || null },
+        })
         return res.data
       } finally {
         this.loading = false
@@ -98,6 +108,11 @@ export const usePartnersStore = defineStore('partners', {
 
     async createPartner(data) {
       const res = await api.post('/partners/', data)
+      trackSafe('other', {
+        object_type: 'partner',
+        object_id:   res.data?.id ?? null,
+        metadata:    { action: 'partner_create' },
+      })
       return res.data
     },
 
@@ -106,11 +121,21 @@ export const usePartnersStore = defineStore('partners', {
       if (this.currentPartner?.id === id) {
         this.currentPartner = res.data
       }
+      trackSafe('other', {
+        object_type: 'partner',
+        object_id:   id,
+        metadata:    { action: 'partner_update', fields: Object.keys(data || {}) },
+      })
       return res.data
     },
 
     async updateStage(id, stage) {
       const res = await api.patch(`/partners/${id}/stage/`, { stage })
+      trackSafe('status_change', {
+        object_type: 'partner',
+        object_id:   id,
+        metadata:    { stage },
+      })
       for (const [col, items] of Object.entries(this.kanbanData)) {
         const idx = items.findIndex(p => p.id === id)
         if (idx !== -1) {
@@ -183,6 +208,11 @@ export const usePartnersStore = defineStore('partners', {
     async createContact(formData) {
       const res = await api.post('/contacts/', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      trackSafe('contact_create', {
+        object_type: 'contact',
+        object_id:   res.data?.id ?? null,
+        metadata:    { partner: res.data?.partner ?? null },
       })
       return res.data
     },

@@ -11,6 +11,7 @@ SECTIONS = {
     'reports':              ['view', 'create'],
     'analytics':            ['view'],
     'operators':            ['view'],
+    'operator_activity':    ['view'],
 }
 
 _T = True
@@ -25,6 +26,7 @@ ROLE_DEFAULTS = {
         'reports':              {'view': _T, 'create': _T},
         'analytics':            {'view': _T},
         'operators':            {'view': _T},
+        'operator_activity':    {'view': _T},
     },
     'operator': {
         'partners':             {'view': _T, 'create': _F, 'edit': _F, 'delete': _F},
@@ -34,6 +36,7 @@ ROLE_DEFAULTS = {
         'reports':              {'view': _T, 'create': _F},
         'analytics':            {'view': _F},
         'operators':            {'view': _F},
+        'operator_activity':    {'view': _F},
     },
     'producer_onboarding': {
         'partners':             {'view': _F, 'create': _F, 'edit': _F, 'delete': _F},
@@ -43,6 +46,7 @@ ROLE_DEFAULTS = {
         'reports':              {'view': _F, 'create': _F},
         'analytics':            {'view': _F},
         'operators':            {'view': _F},
+        'operator_activity':    {'view': _F},
     },
     'producer_support': {
         'partners':             {'view': _F, 'create': _F, 'edit': _F, 'delete': _F},
@@ -52,6 +56,7 @@ ROLE_DEFAULTS = {
         'reports':              {'view': _F, 'create': _F},
         'analytics':            {'view': _F},
         'operators':            {'view': _F},
+        'operator_activity':    {'view': _F},
     },
     'producer_operator': {
         'partners':             {'view': _F, 'create': _F, 'edit': _F, 'delete': _F},
@@ -61,6 +66,7 @@ ROLE_DEFAULTS = {
         'reports':              {'view': _T, 'create': _F},
         'analytics':            {'view': _F},
         'operators':            {'view': _F},
+        'operator_activity':    {'view': _F},
     },
 }
 

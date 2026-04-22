@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from 'boot/axios'
+import { getActivityTracker } from 'src/composables/useActivityTracker'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -36,6 +37,11 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem('access_token',  res.data.access)
       localStorage.setItem('refresh_token', res.data.refresh)
       await this.fetchMe()
+      try {
+        const tracker = getActivityTracker()
+        tracker.start()
+        tracker.track('login', { metadata: { username } })
+      } catch { /* tracker is best-effort */ }
       return res.data
     },
 
@@ -50,6 +56,11 @@ export const useAuthStore = defineStore('auth', {
     },
 
     logout() {
+      try {
+        const tracker = getActivityTracker()
+        tracker.track('logout')
+        tracker.stop()
+      } catch { /* tracker is best-effort */ }
       this.user        = null
       this.permissions = {}
       this.accessToken  = null
