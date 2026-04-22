@@ -228,6 +228,9 @@ const partnerNavItems = computed(() => {
   if (authStore.can('analytics', 'view')) {
     items.push({ path: '/analytics', label: 'Analytics', icon: 'analytics' })
   }
+  if (authStore.can('operator_activity', 'view')) {
+    items.push({ path: '/operator-activity', label: 'Operator Activity', icon: 'timeline' })
+  }
   if (authStore.can('reports', 'view')) {
     items.push({ path: '/ai-report', label: 'AI Report',  icon: 'auto_awesome' })
   }
@@ -286,6 +289,7 @@ const pageTitles = {
   '/sales':             'Sales',
   '/analytics':         'Analytics',
   '/operators':         'Operator Stats',
+  '/operator-activity': 'Operator Activity',
   '/tasks':             'Tasks',
   '/abandoned':         'Abandoned Partners',
   '/ai-report':         'AI Report',

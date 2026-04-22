@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'tasks',
     'reports',
     'producers',
+    'activity.apps.ActivityConfig',
 ]
 
 MIDDLEWARE = [
