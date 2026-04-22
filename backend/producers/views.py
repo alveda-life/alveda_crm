@@ -65,7 +65,7 @@ class ProducerViewSet(viewsets.ModelViewSet):
             allowed_funnels.append(Producer.FUNNEL_SUPPORT)
         if not allowed_funnels:
             return Producer.objects.none()
-        qs = qs.filter(funnel__in=allowed_funnels, assigned_to=user)
+        qs = qs.filter(funnel__in=allowed_funnels)
         return qs
 
     def _check_funnel_perm(self, funnel, action):
@@ -179,7 +179,7 @@ class ProducerViewSet(viewsets.ModelViewSet):
                     allowed_funnels = []
                     if can_on:  allowed_funnels.append(Producer.FUNNEL_ONBOARDING)
                     if can_sup: allowed_funnels.append(Producer.FUNNEL_SUPPORT)
-                    qs = qs.filter(funnel__in=allowed_funnels, assigned_to_id=user_id)
+                    qs = qs.filter(funnel__in=allowed_funnels)
 
                 if funnel_filter:
                     qs = qs.filter(funnel=funnel_filter)
@@ -529,7 +529,7 @@ class ProducerStatsView(APIView):
                 allowed.append(Producer.FUNNEL_ONBOARDING)
             if _can(user, 'producers_support', 'view'):
                 allowed.append(Producer.FUNNEL_SUPPORT)
-            qs = qs.filter(funnel__in=allowed, assigned_to=user)
+            qs = qs.filter(funnel__in=allowed)
         return Response({
             'total':      qs.count(),
             'onboarding': qs.filter(funnel=Producer.FUNNEL_ONBOARDING).count(),

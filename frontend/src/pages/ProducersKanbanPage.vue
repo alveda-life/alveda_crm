@@ -249,6 +249,9 @@ const onProducerCreated = () => {
 }
 
 onMounted(async () => {
+  // Reset stale per-operator filter that might have leaked in from another page
+  store.filters.assigned_to = ''
+  store.filters.search      = ''
   await Promise.all([
     store.fetchKanban(props.funnel),
     store.fetchStats(),
