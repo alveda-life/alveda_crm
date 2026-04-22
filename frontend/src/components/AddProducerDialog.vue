@@ -1,6 +1,6 @@
 <template>
   <q-dialog :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" persistent>
-    <q-card style="min-width:480px;max-width:580px;border-radius:16px;max-height:92vh;" class="column">
+    <q-card style="min-width:480px;max-width:580px;border-radius:16px;max-height:92vh;display:flex;flex-direction:column;">
       <q-card-section class="row items-center q-pb-none flex-shrink-0">
         <q-icon name="factory" color="primary" size="24px" class="q-mr-sm" />
         <div class="text-h6 text-weight-bold">{{ isEdit ? 'Edit Producer' : 'Add Producer' }}</div>
@@ -8,9 +8,8 @@
         <q-btn icon="close" flat round dense @click="$emit('update:modelValue', false)" />
       </q-card-section>
 
-      <q-scroll-area style="flex:1;min-height:0;">
-        <q-card-section>
-          <q-form @submit.prevent="save" ref="formRef">
+      <q-card-section style="flex:1 1 auto;min-height:0;overflow-y:auto;">
+        <q-form @submit.prevent="save" ref="formRef">
             <div class="row q-col-gutter-md">
 
               <!-- Name -->
@@ -183,9 +182,8 @@
                 style="border-radius:8px;" />
               <q-btn flat color="grey-7" label="Cancel" @click="$emit('update:modelValue', false)" />
             </div>
-          </q-form>
-        </q-card-section>
-      </q-scroll-area>
+        </q-form>
+      </q-card-section>
     </q-card>
   </q-dialog>
 </template>
