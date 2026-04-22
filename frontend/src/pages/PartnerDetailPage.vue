@@ -673,13 +673,21 @@
                     <div v-if="contact.audio_url">
                       <div class="row items-center justify-between q-mb-xs">
                         <div class="field-label"><q-icon name="graphic_eq" size="14px" /> Audio</div>
-                        <a v-if="contact.transcript_url"
-                          :href="contact.transcript_url" download
-                          class="row items-center q-gutter-xs no-decoration"
-                          style="font-size:11px; color:#1976D2; font-weight:600;">
-                          <q-icon name="download" size="14px" />
-                          <span>Download transcript (.txt)</span>
-                        </a>
+                        <div class="row items-center q-gutter-xs">
+                          <q-btn
+                            v-if="contact.diarized_transcript || contact.transcription"
+                            flat dense size="sm" color="primary" icon="visibility"
+                            label="View transcript"
+                            @click="openTranscriptViewer(contact)"
+                          />
+                          <a v-if="contact.transcript_url"
+                            :href="contact.transcript_url" download
+                            class="row items-center q-gutter-xs no-decoration"
+                            style="font-size:11px; color:#1976D2; font-weight:600;">
+                            <q-icon name="download" size="14px" />
+                            <span>Download transcript (.txt)</span>
+                          </a>
+                        </div>
                       </div>
                       <audio controls :src="contact.audio_url" style="width:100%; height:36px;" />
                     </div>
@@ -708,6 +716,24 @@
       @updated="onTaskDetailUpdated"
       @edit="openTaskEdit"
     />
+
+    <q-dialog v-model="showTranscriptDialog">
+      <q-card style="width:min(1100px,96vw); max-width:96vw; border-radius:12px;">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-subtitle1 text-weight-bold">Transcript Viewer</div>
+          <q-space />
+          <q-btn flat round dense icon="close" v-close-popup />
+        </q-card-section>
+        <q-card-section style="max-height:75vh; overflow:auto;">
+          <TranscriptChat
+            :diarized="transcriptViewerContact?.diarized_transcript || ''"
+            :raw="transcriptViewerContact?.transcription || ''"
+            :compact="false"
+            initial-view="chat"
+          />
+        </q-card-section>
+      </q-card>
+    </q-dialog>
 
   </q-page>
 </template>
@@ -1087,6 +1113,8 @@ const toggleSummary = (id) => {
 }
 
 const retryingContact = ref(null)
+const showTranscriptDialog = ref(false)
+const transcriptViewerContact = ref(null)
 
 const retryTranscription = async (contact) => {
   retryingContact.value = contact.id
@@ -1114,6 +1142,11 @@ const retrySummary = async (contact) => {
   } finally {
     retryingContact.value = null
   }
+}
+
+const openTranscriptViewer = (contact) => {
+  transcriptViewerContact.value = contact
+  showTranscriptDialog.value = true
 }
 
 const saveWhatsapp = async (val) => {
