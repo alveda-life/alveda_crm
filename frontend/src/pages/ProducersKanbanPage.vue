@@ -178,8 +178,9 @@ const funnelLabel = computed(() =>
 
 const onboardingStages = {
   interest:        { label: 'Interest',          color: '#F44336', colorName: 'red',           bgLight: '#FFEBEE', icon: 'star_outline' },
-  in_communication:{ label: 'In Communication',  color: '#FF9800', colorName: 'orange',         bgLight: '#FFF3E0', icon: 'forum' },
-  negotiation:     { label: 'Signing Contract',     color: '#9C27B0', colorName: 'purple',       bgLight: '#F3E5F5', icon: 'gavel' },
+  in_communication: { label: 'In Communication', color: '#FF9800', colorName: 'orange',         bgLight: '#FFF3E0', icon: 'forum' },
+  terms_negotiation:{ label: 'Negotiation',       color: '#EF6C00', colorName: 'deep-orange-9',  bgLight: '#FBE9E7', icon: 'sync_alt' },
+  negotiation:      { label: 'Signing Contract',  color: '#9C27B0', colorName: 'purple',         bgLight: '#F3E5F5', icon: 'gavel' },
   contract_signed: { label: 'Contract Signed',   color: '#1565C0', colorName: 'blue-9',         bgLight: '#E3F2FD', icon: 'draw' },
   on_platform:     { label: 'On the Platform',   color: '#2E7D32', colorName: 'green-9',        bgLight: '#E8F5E9', icon: 'rocket_launch' },
   stopped:         { label: 'Stopped',           color: '#757575', colorName: 'grey-7',         bgLight: '#F5F5F5', icon: 'block' },

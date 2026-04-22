@@ -194,7 +194,8 @@ let pollTimer = null
 const stageOptions = [
   { label: 'All',          value: 'all' },
   { label: 'In Comm',      value: 'in_communication' },
-  { label: 'Negotiation',  value: 'negotiation' },
+  { label: 'Negotiation',  value: 'terms_negotiation' },
+  { label: 'Signing',      value: 'negotiation' },
   { label: 'Contract',     value: 'contract_signed' },
 ]
 
@@ -211,9 +212,10 @@ const currentReport = computed(() =>
 )
 
 const STAGE_ORDER = {
-  contract_signed:  0,
-  negotiation:      1,
-  in_communication: 2,
+  contract_signed:   0,
+  negotiation:       1,
+  terms_negotiation: 2,
+  in_communication:  3,
 }
 
 const filteredBrands = computed(() => {
@@ -279,10 +281,11 @@ function readinessColor (pct) {
 }
 
 function stageColor (stage) {
-  if (stage === 'on_platform')      return 'green-7'
-  if (stage === 'contract_signed')  return 'indigo-6'
-  if (stage === 'negotiation')      return 'deep-purple-5'
-  if (stage === 'in_communication') return 'blue-grey-6'
+  if (stage === 'on_platform')       return 'green-7'
+  if (stage === 'contract_signed')   return 'indigo-6'
+  if (stage === 'negotiation')       return 'deep-purple-5'
+  if (stage === 'terms_negotiation') return 'deep-orange-6'
+  if (stage === 'in_communication')  return 'blue-grey-6'
   return 'grey-7'
 }
 

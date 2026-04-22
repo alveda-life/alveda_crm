@@ -640,12 +640,13 @@ function initials(name) {
 }
 
 const stageColors = {
-  interest:         '#F44336',
-  in_communication: '#FF9800',
-  negotiation:      '#9C27B0',
-  contract_signed:  '#1565C0',
-  on_platform:      '#2E7D32',
-  stopped:          '#757575',
+  interest:          '#F44336',
+  in_communication:  '#FF9800',
+  terms_negotiation: '#EF6C00',
+  negotiation:       '#9C27B0',
+  contract_signed:   '#1565C0',
+  on_platform:       '#2E7D32',
+  stopped:           '#757575',
 }
 
 function stageColor(key) {

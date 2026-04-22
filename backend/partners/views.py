@@ -1,6 +1,7 @@
+from datetime import timedelta, date as _date
+
 from django.db.models import Count, Q, Max, OuterRef, Subquery
 from django.utils import timezone
-from datetime import timedelta
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,6 +12,13 @@ from accounts.models import RolePermission
 from contacts.models import Contact
 from .models import Partner
 from .serializers import PartnerListSerializer, PartnerWriteSerializer
+
+
+def _parse_iso_date(value):
+    try:
+        return _date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
 
 
 OPERATOR_ALLOWED_FIELDS = {
@@ -66,7 +74,7 @@ def _operator_validate_partner_patch(user, instance, data):
 class PartnerViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['stage', 'type', 'category', 'assigned_to']
+    filterset_fields = ['stage', 'type', 'category', 'assigned_to', 'status']
     search_fields = ['name', 'phone', 'user_id', 'referred_by']
     ordering_fields = [
         'name', 'created_at', 'updated_at',
@@ -94,12 +102,21 @@ class PartnerViewSet(viewsets.ModelViewSet):
                     'contacts',
                     filter=Q(contacts__is_missed_call=True)
                 ),
+                total_contacts_count=Count('contacts'),
                 last_contact_date=Max('contacts__date'),
             )
         )
         min_paid = self.request.query_params.get('min_paid_orders')
         if min_paid:
             qs = qs.filter(paid_orders_count__gte=min_paid)
+
+        date_from = _parse_iso_date(self.request.query_params.get('control_date_from'))
+        date_to   = _parse_iso_date(self.request.query_params.get('control_date_to'))
+        if date_from:
+            qs = qs.filter(control_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(control_date__lte=date_to)
+
         return qs
 
     def get_serializer_class(self):
@@ -137,22 +154,37 @@ class PartnerViewSet(viewsets.ModelViewSet):
         partner = serializer.save()
         return Response(self._serialize(self._annotated(partner.pk), request))
 
+    DEAD_STAGES_SET = {Partner.STAGE_NO_ANSWER, Partner.STAGE_DECLINED, Partner.STAGE_NO_SALES}
+
     @action(detail=True, methods=['patch'], url_path='stage')
     def update_stage(self, request, pk=None):
-        if _is_operator(request.user):
-            return Response(
-                {'detail': 'Operators cannot change the funnel stage.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         partner = self.get_object()
-        stage = request.data.get('stage')
-        if stage not in dict(Partner.STAGE_CHOICES):
+        new_stage = request.data.get('stage')
+        if new_stage not in dict(Partner.STAGE_CHOICES):
             return Response({'error': 'Invalid stage'}, status=status.HTTP_400_BAD_REQUEST)
-        partner.stage = stage
+
+        if _is_operator(request.user):
+            if new_stage in self.DEAD_STAGES_SET:
+                pass
+            elif new_stage == Partner.STAGE_TRAINED:
+                has_own_activity = Contact.objects.filter(
+                    partner=partner, created_by=request.user
+                ).exists()
+                if not has_own_activity:
+                    return Response(
+                        {'detail': 'Add an Activity record before moving the partner to "Agreed to Create First Set".'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            else:
+                return Response(
+                    {'detail': 'Operators can only move partners to "Agreed to Create First Set" or a Dead stage. Set Created / Has Sale are managed automatically.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        partner.stage = new_stage
         partner.save(update_fields=['stage', 'status', 'updated_at', 'stage_changed_at'])
         return Response(self._serialize(self._annotated(partner.pk), request))
 
-    DEAD_STAGES_SET = {Partner.STAGE_NO_ANSWER, Partner.STAGE_DECLINED, Partner.STAGE_NO_SALES}
     KANBAN_LIMIT_ACTIVE = 50
     KANBAN_LIMIT_DEAD = 10
 

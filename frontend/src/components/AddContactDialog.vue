@@ -114,9 +114,14 @@
           unelevated color="primary"
           :label="contact ? 'Save' : 'Add Record'"
           :loading="saving"
+          :disable="!canSave"
           @click="save"
           style="border-radius: 8px; min-width: 130px;"
-        />
+        >
+          <q-tooltip v-if="!canSave">
+            Attach an audio file or check "No Answer" / "Call Back Later" to save
+          </q-tooltip>
+        </q-btn>
       </q-card-actions>
     </q-card>
   </q-dialog>
@@ -162,6 +167,13 @@ const form = ref({
   callback_later: false,
   callback_date: '',
 })
+
+const canSave = computed(() =>
+  !!audioFile.value
+  || !!form.value.existing_audio
+  || form.value.is_missed_call
+  || form.value.callback_later
+)
 
 watch(() => props.contact, (c) => {
   if (c) {

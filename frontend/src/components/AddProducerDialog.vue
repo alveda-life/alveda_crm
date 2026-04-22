@@ -298,7 +298,8 @@ const funnelOptions = [
 const onboardingStageOptions = [
   { label: 'Interest',         value: 'interest' },
   { label: 'In Communication', value: 'in_communication' },
-  { label: 'Signing Contract',     value: 'negotiation' },
+  { label: 'Negotiation',      value: 'terms_negotiation' },
+  { label: 'Signing Contract', value: 'negotiation' },
   { label: 'Contract Signed',  value: 'contract_signed' },
   { label: 'On the Platform',  value: 'on_platform' },
   { label: 'Stopped',          value: 'stopped' },

@@ -26,6 +26,15 @@
         @update:model-value="loadPartners"
       />
       <q-select
+        v-model="filters.status"
+        :options="statusOptions"
+        emit-value map-options
+        outlined dense clearable
+        placeholder="All Statuses"
+        style="min-width: 140px;"
+        @update:model-value="loadPartners"
+      />
+      <q-select
         v-model="filters.type"
         :options="typeOptions"
         emit-value map-options
@@ -43,6 +52,25 @@
         style="min-width: 160px;"
         @update:model-value="loadPartners"
       />
+
+      <q-input
+        :model-value="controlDateLabel"
+        outlined dense readonly clearable
+        placeholder="Control date"
+        style="min-width: 220px;"
+        @clear="clearControlDate"
+      >
+        <template #prepend><q-icon name="event" /></template>
+        <q-popup-proxy ref="controlDatePopup" cover transition-show="scale" transition-hide="scale">
+          <q-date
+            v-model="controlDateRange"
+            range
+            mask="YYYY-MM-DD"
+            today-btn
+            @update:model-value="onControlDateChange"
+          />
+        </q-popup-proxy>
+      </q-input>
 
       <q-btn
         :outline="!onlyMine"
@@ -191,7 +219,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuasar } from 'quasar'
 import { useAuthStore } from 'src/stores/auth'
@@ -210,7 +238,26 @@ const search = ref('')
 const showAddDialog = ref(false)
 const onlyMine = ref(false)
 
-const filters = reactive({ stage: '', type: '', category: '' })
+const filters = reactive({ stage: '', status: '', type: '', category: '' })
+const controlDateRange = ref(null)
+const controlDatePopup = ref(null)
+
+const controlDateLabel = computed(() => {
+  const v = controlDateRange.value
+  if (!v) return ''
+  if (typeof v === 'string') return v
+  return v.from === v.to ? v.from : `${v.from} → ${v.to}`
+})
+
+const onControlDateChange = () => {
+  loadPartners()
+  controlDatePopup.value?.hide()
+}
+
+const clearControlDate = () => {
+  controlDateRange.value = null
+  loadPartners()
+}
 const pagination = ref({ page: 1, rowsPerPage: 25, rowsNumber: 0, sortBy: 'created_at', descending: true })
 
 const columns = [
@@ -232,6 +279,14 @@ const stageOptions = [
   { label: 'Agreed to Create First Set', value: 'trained' },
   { label: 'Set Created', value: 'set_created' },
   { label: 'Has Sale', value: 'has_sale' },
+  { label: 'Dead (No Answer)', value: 'no_answer' },
+  { label: 'Dead (Declined)', value: 'declined' },
+  { label: 'Dead (No Sales)', value: 'no_sales' },
+]
+const statusOptions = [
+  { label: 'New', value: 'new' },
+  { label: 'In Support', value: 'in_support' },
+  { label: 'Closed', value: 'closed' },
 ]
 const typeOptions = [
   { label: 'Partner', value: 'partner' },
@@ -264,8 +319,19 @@ const loadPartners = async () => {
     }
     if (search.value) params.search = search.value
     if (filters.stage) params.stage = filters.stage
+    if (filters.status) params.status = filters.status
     if (filters.type) params.type = filters.type
     if (filters.category) params.category = filters.category
+    const cd = controlDateRange.value
+    if (cd) {
+      if (typeof cd === 'string') {
+        params.control_date_from = cd
+        params.control_date_to = cd
+      } else {
+        if (cd.from) params.control_date_from = cd.from
+        if (cd.to)   params.control_date_to   = cd.to
+      }
+    }
     if (onlyMine.value) params.assigned_to = authStore.user?.id
     if (pagination.value.sortBy) {
       params.ordering = (pagination.value.descending ? '-' : '') + pagination.value.sortBy

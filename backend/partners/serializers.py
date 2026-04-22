@@ -8,6 +8,7 @@ class PartnerListSerializer(serializers.ModelSerializer):
     assigned_to_detail = UserSerializer(source='assigned_to', read_only=True)
     contacts_count = serializers.ReadOnlyField()
     missed_calls_count = serializers.ReadOnlyField()
+    total_contacts_count = serializers.ReadOnlyField()
     last_contact_date = serializers.ReadOnlyField()
     stage_display = serializers.CharField(source='get_stage_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -29,7 +30,7 @@ class PartnerListSerializer(serializers.ModelSerializer):
             'paid_orders_sum', 'unpaid_orders_sum', 'referrals_count',
             'assigned_to', 'assigned_to_detail', 'notes',
             'whatsapp_added',
-            'contacts_count', 'missed_calls_count', 'last_contact_date',
+            'contacts_count', 'missed_calls_count', 'total_contacts_count', 'last_contact_date',
             'current_user_has_activity',
             'created_at', 'updated_at',
         ]

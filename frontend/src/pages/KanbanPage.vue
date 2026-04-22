@@ -59,6 +59,26 @@
         @update:model-value="store.fetchKanban()"
       />
 
+      <!-- Control date range -->
+      <q-input
+        :model-value="controlDateLabel"
+        outlined dense readonly clearable
+        placeholder="Control date"
+        style="min-width: 220px;"
+        @clear="clearControlDate"
+      >
+        <template #prepend><q-icon name="event" /></template>
+        <q-popup-proxy ref="controlDatePopup" cover transition-show="scale" transition-hide="scale">
+          <q-date
+            v-model="controlDateRange"
+            range
+            mask="YYYY-MM-DD"
+            today-btn
+            @update:model-value="onControlDateChange"
+          />
+        </q-popup-proxy>
+      </q-input>
+
       <q-btn
         :outline="!onlyMine"
         :color="onlyMine ? 'primary' : 'grey-7'"
@@ -133,7 +153,6 @@
           group="partners"
           item-key="id"
           :animation="150"
-          :disabled="authStore.isOperator"
           ghost-class="drag-ghost"
           chosen-class="drag-chosen"
           @add="(evt) => onDragEnd(evt, key)"
@@ -210,6 +229,39 @@ function toggleMine() {
 const showAddDialog = ref(false)
 const dragOver = ref(null)
 const loadingMore = ref({})
+
+const controlDateRange = ref(null)
+const controlDatePopup = ref(null)
+
+const controlDateLabel = computed(() => {
+  const v = controlDateRange.value
+  if (!v) return ''
+  if (typeof v === 'string') return v
+  return v.from === v.to ? v.from : `${v.from} → ${v.to}`
+})
+
+const onControlDateChange = () => {
+  const v = controlDateRange.value
+  if (!v) {
+    store.filters.control_date_from = ''
+    store.filters.control_date_to = ''
+  } else if (typeof v === 'string') {
+    store.filters.control_date_from = v
+    store.filters.control_date_to = v
+  } else {
+    store.filters.control_date_from = v.from || ''
+    store.filters.control_date_to   = v.to   || ''
+  }
+  store.fetchKanban()
+  controlDatePopup.value?.hide()
+}
+
+const clearControlDate = () => {
+  controlDateRange.value = null
+  store.filters.control_date_from = ''
+  store.filters.control_date_to = ''
+  store.fetchKanban()
+}
 
 const loadMore = async (stageKey) => {
   loadingMore.value[stageKey] = true
@@ -318,12 +370,48 @@ const handleAssign = async ({ partnerId, userId, userDetail }) => {
   }
 }
 
+const DEAD_STAGES = ['no_answer', 'declined', 'no_sales']
+const OPERATOR_ALLOWED_TARGETS = new Set(['trained', ...DEAD_STAGES])
+
+const partnerTotalContacts = (p) =>
+  p?.total_contacts_count
+  ?? ((p?.contacts_count ?? 0) + (p?.missed_calls_count ?? 0))
+
+const operatorMoveError = (partner, toStage) => {
+  if (!partner) return null
+  if (!OPERATOR_ALLOWED_TARGETS.has(toStage)) {
+    return 'Operators can only move partners to "Agreed to Create First Set" or a Dead stage. Set Created / Has Sale are managed automatically.'
+  }
+  if (toStage === 'trained' && !partner.current_user_has_activity) {
+    return 'Add an Activity record before moving the partner to "Agreed to Create First Set".'
+  }
+  return null
+}
+
+const extractDetail = (e) => {
+  const data = e?.response?.data
+  if (!data) return null
+  if (typeof data === 'string') return data
+  if (typeof data.detail === 'string') return data.detail
+  if (typeof data.error === 'string') return data.error
+  try {
+    const flat = Object.values(data).flat().filter(Boolean)
+    if (flat.length) return flat.join(' ')
+  } catch { /* ignore */ }
+  return null
+}
+
 const handleStageChange = async ({ partnerId, newStage }) => {
   try {
     await store.updateStage(partnerId, newStage)
     $q.notify({ type: 'positive', message: 'Stage updated' })
-  } catch {
-    $q.notify({ type: 'negative', message: 'Failed to update stage' })
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: extractDetail(e) || 'Failed to update stage',
+      timeout: 4000,
+      multiLine: true,
+    })
     store.fetchKanban()
   }
 }
@@ -334,11 +422,25 @@ const onDragEnd = async (evt, toStage) => {
   const movedElement = store.kanbanData[toStage][evt.newIndex]
   if (!movedElement) return
 
+  if (authStore.isOperator) {
+    const err = operatorMoveError(movedElement, toStage)
+    if (err) {
+      $q.notify({ type: 'negative', message: err, timeout: 4000, multiLine: true })
+      store.fetchKanban()
+      return
+    }
+  }
+
   try {
     await store.updateStage(movedElement.id, toStage)
     $q.notify({ type: 'positive', message: `Moved to "${stageConfig[toStage].label}"`, timeout: 1500 })
-  } catch {
-    $q.notify({ type: 'negative', message: 'Failed to update stage' })
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: extractDetail(e) || 'Failed to update stage',
+      timeout: 4000,
+      multiLine: true,
+    })
     store.fetchKanban()
   }
 }

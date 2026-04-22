@@ -618,6 +618,7 @@ class ProducerAnalyticsView(APIView):
                   assigned  = Count('id'),
                   stopped   = Count('id', filter=Q(stage=Producer.STAGE_STOPPED)),
                   advanced  = Count('id', filter=Q(stage__in=[
+                      Producer.STAGE_TERMS_NEGOTIATION,
                       Producer.STAGE_NEGOTIATION,
                       Producer.STAGE_CONTRACT_SIGNED,
                       Producer.STAGE_ON_PLATFORM,

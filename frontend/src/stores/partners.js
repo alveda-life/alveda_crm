@@ -29,6 +29,8 @@ export const usePartnersStore = defineStore('partners', {
       type: '',
       category: '',
       assigned_to: '',
+      control_date_from: '',
+      control_date_to: '',
     },
   }),
 
@@ -45,6 +47,8 @@ export const usePartnersStore = defineStore('partners', {
       if (this.filters.type) params.type = this.filters.type
       if (this.filters.category) params.category = this.filters.category
       if (this.filters.assigned_to) params.assigned_to = this.filters.assigned_to
+      if (this.filters.control_date_from) params.control_date_from = this.filters.control_date_from
+      if (this.filters.control_date_to)   params.control_date_to   = this.filters.control_date_to
       return params
     },
 

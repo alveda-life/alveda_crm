@@ -13,20 +13,22 @@ class Producer(models.Model):
     ]
 
     # ── Onboarding stages ───────────────────────────────────────────────────
-    STAGE_INTEREST        = 'interest'
-    STAGE_IN_COMMUNICATION= 'in_communication'
-    STAGE_NEGOTIATION     = 'negotiation'
-    STAGE_CONTRACT_SIGNED = 'contract_signed'
-    STAGE_ON_PLATFORM     = 'on_platform'
-    STAGE_STOPPED         = 'stopped'
+    STAGE_INTEREST           = 'interest'
+    STAGE_IN_COMMUNICATION   = 'in_communication'
+    STAGE_TERMS_NEGOTIATION  = 'terms_negotiation'
+    STAGE_NEGOTIATION        = 'negotiation'
+    STAGE_CONTRACT_SIGNED    = 'contract_signed'
+    STAGE_ON_PLATFORM        = 'on_platform'
+    STAGE_STOPPED            = 'stopped'
 
     ONBOARDING_STAGE_CHOICES = [
-        (STAGE_INTEREST,         'Interest'),
-        (STAGE_IN_COMMUNICATION, 'In Communication'),
-        (STAGE_NEGOTIATION,      'Signing Contract'),
-        (STAGE_CONTRACT_SIGNED,  'Contract Signed'),
-        (STAGE_ON_PLATFORM,      'On the Platform'),
-        (STAGE_STOPPED,          'Stopped'),
+        (STAGE_INTEREST,          'Interest'),
+        (STAGE_IN_COMMUNICATION,  'In Communication'),
+        (STAGE_TERMS_NEGOTIATION, 'Negotiation'),
+        (STAGE_NEGOTIATION,       'Signing Contract'),
+        (STAGE_CONTRACT_SIGNED,   'Contract Signed'),
+        (STAGE_ON_PLATFORM,       'On the Platform'),
+        (STAGE_STOPPED,           'Stopped'),
     ]
 
     # ── Support stages ──────────────────────────────────────────────────────

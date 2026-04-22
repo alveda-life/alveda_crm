@@ -17,12 +17,13 @@ from django.db import close_old_connections
 
 IST_TZ = pytz.timezone('Asia/Kolkata')
 
-ACTIVE_STAGES = ['in_communication', 'negotiation', 'contract_signed']
+ACTIVE_STAGES = ['in_communication', 'terms_negotiation', 'negotiation', 'contract_signed']
 
 STAGE_LABELS = {
-    'in_communication': 'In Communication',
-    'negotiation':      'Signing Contract',
-    'contract_signed':  'Contract Signed',
+    'in_communication':  'In Communication',
+    'terms_negotiation': 'Negotiation',
+    'negotiation':       'Signing Contract',
+    'contract_signed':   'Contract Signed',
 }
 
 _MAX_RETRIES = 5

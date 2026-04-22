@@ -77,6 +77,23 @@
             </q-list>
           </template>
 
+          <!-- Monitoring (visible to everyone) -->
+          <q-separator dark class="q-my-xs" />
+          <div class="nav-section-label">Monitoring</div>
+          <q-list padding class="q-pt-none">
+            <q-item
+              clickable v-ripple
+              class="rounded-borders q-mx-sm q-mb-xs"
+              style="border-radius:8px;"
+              @click="onScreenRecordingsClick"
+            >
+              <q-item-section avatar>
+                <q-icon name="videocam" size="20px" />
+              </q-item-section>
+              <q-item-section>Operator Screen Recordings of CRM</q-item-section>
+            </q-item>
+          </q-list>
+
           <!-- Producers section (admin + producer_operator) -->
           <template v-if="showProducerNav">
             <q-separator dark class="q-my-xs" v-if="showPartnerNav || showToolsNav" />
@@ -188,11 +205,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useQuasar } from 'quasar'
 import { useAuthStore } from 'src/stores/auth'
 import { usePartnersStore } from 'src/stores/partners'
 import { useProducersStore } from 'src/stores/producers'
 import { useTasksStore } from 'src/stores/tasks'
 
+const $q       = useQuasar()
 const drawer   = ref(true)
 const route    = useRoute()
 const router   = useRouter()
@@ -200,6 +219,17 @@ const authStore     = useAuthStore()
 const partnersStore = usePartnersStore()
 const producersStore = useProducersStore()
 const tasksStore     = useTasksStore()
+
+const onScreenRecordingsClick = () => {
+  $q.notify({
+    type: 'negative',
+    icon: 'lock',
+    message: 'Access denied',
+    caption: 'You do not have permission to view the screen recording storage.',
+    timeout: 4000,
+    position: 'top',
+  })
+}
 
 const abandonedCount = ref(0)
 const loading        = ref(false)
@@ -231,7 +261,7 @@ const partnerNavItems = computed(() => {
   if (authStore.can('operator_activity', 'view')) {
     items.push({ path: '/operator-activity', label: 'Operator Activity', icon: 'timeline' })
   }
-  if (authStore.can('reports', 'view')) {
+  if (authStore.can('reports', 'view') && !authStore.isOperator) {
     items.push({ path: '/ai-report', label: 'AI Report',  icon: 'auto_awesome' })
   }
   if (authStore.isAdmin) {

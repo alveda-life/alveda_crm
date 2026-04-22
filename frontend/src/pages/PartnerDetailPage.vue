@@ -108,18 +108,18 @@
               <div class="q-mb-md">
                 <div class="field-label q-mb-xs">
                   Funnel Stage
-                  <q-icon v-if="isOperator" name="lock" size="11px" color="grey-5" />
+                  <q-icon v-if="stageSelectDisabled" name="lock" size="11px" color="grey-5" />
                 </div>
                 <q-select
                   :model-value="partner.stage"
-                  :options="stageOptions"
+                  :options="visibleStageOptions"
                   emit-value map-options
                   outlined dense
-                  :disable="isOperator"
+                  :disable="stageSelectDisabled"
                   @update:model-value="changeStage"
                 >
-                  <q-tooltip v-if="isOperator">
-                    Operators cannot change the funnel stage
+                  <q-tooltip v-if="stageSelectDisabled">
+                    Add a call record to advance the partner, or close the card / confirm there are no calls to move to a Dead stage.
                   </q-tooltip>
                 </q-select>
               </div>
@@ -927,7 +927,33 @@ const stageOptions = [
   { label: 'Agreed to Create First Set', value: 'trained' },
   { label: 'Medical Set Created', value: 'set_created' },
   { label: 'Has Sale', value: 'has_sale' },
+  { label: 'Dead (No Answer)', value: 'no_answer' },
+  { label: 'Dead (Declined)', value: 'declined' },
+  { label: 'Dead (No Sales)', value: 'no_sales' },
 ]
+
+const DEAD_STAGES = ['no_answer', 'declined', 'no_sales']
+
+const operatorCanGoDead = computed(() => !!partner.value)
+
+const operatorAllowedStageTargets = computed(() => {
+  const set = new Set()
+  if (operatorCanGoDead.value) DEAD_STAGES.forEach(s => set.add(s))
+  if (hasOwnActivity.value) set.add('trained')
+  return set
+})
+
+const stageSelectDisabled = computed(
+  () => isOperator.value && operatorAllowedStageTargets.value.size === 0
+)
+
+const visibleStageOptions = computed(() => {
+  if (!isOperator.value) return stageOptions
+  const allowed = operatorAllowedStageTargets.value
+  return stageOptions.filter(
+    o => o.value === partner.value?.stage || allowed.has(o.value)
+  )
+})
 
 const isOverdue = computed(() => {
   if (!partner.value?.control_date) return false
@@ -975,13 +1001,33 @@ const loadContacts = async () => {
   pollIfNeeded()
 }
 
+const extractErrorDetail = (e) => {
+  const data = e?.response?.data
+  if (!data) return null
+  if (typeof data === 'string') return data
+  if (typeof data.detail === 'string') return data.detail
+  if (typeof data.error === 'string') return data.error
+  try {
+    const flat = Object.values(data).flat().filter(Boolean)
+    if (flat.length) return flat.join(' ')
+  } catch { /* ignore */ }
+  return null
+}
+
 const changeStatus = async (newStatus) => {
   if (partner.value.status === newStatus) return
   try {
     await store.updatePartner(partner.value.id, { status: newStatus })
     partner.value.status = newStatus
     $q.notify({ type: 'positive', message: 'Status updated', timeout: 1500 })
-  } catch { $q.notify({ type: 'negative', message: 'Failed to update status' }) }
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: extractErrorDetail(e) || 'Failed to update status',
+      timeout: 4000,
+      multiLine: true,
+    })
+  }
 }
 
 const changeStage = async (newStage) => {
@@ -989,7 +1035,14 @@ const changeStage = async (newStage) => {
     await store.updateStage(partner.value.id, newStage)
     partner.value.stage = newStage
     $q.notify({ type: 'positive', message: 'Stage updated', timeout: 1500 })
-  } catch { $q.notify({ type: 'negative', message: 'Failed to update stage' }) }
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: extractErrorDetail(e) || 'Failed to update stage',
+      timeout: 4000,
+      multiLine: true,
+    })
+  }
 }
 
 const saveControlDate = async (val) => {
@@ -999,9 +1052,18 @@ const saveControlDate = async (val) => {
     $q.notify({ type: 'negative', message: 'Max 14 days ahead', timeout: 2000 })
     return
   }
-  await store.updatePartner(partner.value.id, { control_date: val })
-  partner.value.control_date = val
-  $q.notify({ type: 'positive', message: 'Date saved', timeout: 1500 })
+  try {
+    await store.updatePartner(partner.value.id, { control_date: val })
+    partner.value.control_date = val
+    $q.notify({ type: 'positive', message: 'Date saved', timeout: 1500 })
+  } catch (e) {
+    $q.notify({
+      type: 'negative',
+      message: extractErrorDetail(e) || 'Failed to save date',
+      timeout: 4000,
+      multiLine: true,
+    })
+  }
 }
 
 const startEditProfile = () => {
