@@ -17,6 +17,31 @@ module.exports = function (/* ctx */) {
         node: 'node20',
       },
       vueRouterMode: 'hash',
+      // Write dist/spa/version.json after each build so the running SPA can
+      // detect a new deployment and prompt operators to refresh.
+      afterBuild () {
+        const fs = require('fs')
+        const path = require('path')
+        const { execSync } = require('child_process')
+        let sha = 'dev'
+        try {
+          sha = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+            .toString()
+            .trim() || 'dev'
+        } catch (_) {
+          // .git is not always present (e.g. inside the Docker build context)
+        }
+        const builtAt = new Date().toISOString()
+        // Always include a timestamp so the version is unique per build even
+        // when the git SHA is unavailable.
+        const payload = {
+          version: `${sha}-${Date.now()}`,
+          sha,
+          builtAt,
+        }
+        const out = path.resolve(__dirname, 'dist/spa/version.json')
+        fs.writeFileSync(out, JSON.stringify(payload))
+      },
     },
 
     devServer: {
