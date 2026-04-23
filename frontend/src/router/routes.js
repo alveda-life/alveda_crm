@@ -1,3 +1,6 @@
+import { useAuthStore } from 'src/stores/auth'
+import { getLandingPath } from 'src/utils/landing'
+
 const routes = [
   {
     path: '/login',
@@ -9,13 +12,13 @@ const routes = [
     component: () => import('layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
     children: [
-      { path: '', redirect: '/kanban' },
-      { path: 'kanban', component: () => import('pages/KanbanPage.vue') },
-      { path: 'partners', component: () => import('pages/PartnersPage.vue') },
-      { path: 'partners/:id', component: () => import('pages/PartnerDetailPage.vue') },
-      { path: 'sales', component: () => import('pages/SalesPage.vue') },
-      { path: 'operators', component: () => import('pages/OperatorStatsPage.vue') },
-      { path: 'abandoned', component: () => import('pages/AbandonedPage.vue') },
+      { path: '', redirect: () => getLandingPath(useAuthStore()) },
+      { path: 'kanban',       component: () => import('pages/KanbanPage.vue'),         meta: { section: 'partners' } },
+      { path: 'partners',     component: () => import('pages/PartnersPage.vue'),       meta: { section: 'partners' } },
+      { path: 'partners/:id', component: () => import('pages/PartnerDetailPage.vue'),  meta: { section: 'partners' } },
+      { path: 'sales',        component: () => import('pages/SalesPage.vue'),          meta: { section: 'partners' } },
+      { path: 'operators',    component: () => import('pages/OperatorStatsPage.vue'),  meta: { section: 'partners' } },
+      { path: 'abandoned',    component: () => import('pages/AbandonedPage.vue'),      meta: { section: 'partners' } },
     ],
   },
   {
