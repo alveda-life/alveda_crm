@@ -1,6 +1,6 @@
 """
 Self-healing retry engine for the AI pipeline (transcription, summarization,
-operator feedback).
+operator feedback, call insights, Telegram insight delivery).
 
 Design goals:
   • Never lose a Contact transcription/summary or an OperatorFeedback row to
@@ -284,11 +284,174 @@ def _retry_feedback(stats):
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Pipeline 4 — Call insights (partner market/product extraction)
+# ──────────────────────────────────────────────────────────────────────────
+def _retry_call_insights(stats):
+    from django.db.models import Q, Exists, OuterRef
+    from .models import Contact, CallInsight
+    from .insights import extract_call_insights
+
+    cutoff_stuck = timezone.now() - timedelta(minutes=STUCK_PROCESSING_MINUTES)
+
+    has_insight = Exists(CallInsight.objects.filter(contact_id=OuterRef('pk')))
+    missing_qs = (
+        Contact.objects.filter(transcription_status=Contact.TRANSCRIPTION_DONE)
+        .filter(~has_insight)
+        .filter(Q(transcription__gt='') | Q(diarized_transcript__gt=''))
+        .order_by('-date')[:40]
+    )
+    for c in missing_qs:
+        try:
+            extract_call_insights(c.pk, force=False)
+            if CallInsight.objects.filter(
+                contact_id=c.pk, status=CallInsight.STATUS_DONE,
+            ).exists():
+                stats['recovered'] += 1
+        except Exception as e:
+            stats['failed_again'] += 1
+            logger.warning('CallInsight missing-row heal failed for contact %s: %s', c.pk, e)
+
+    candidates = CallInsight.objects.filter(
+        Q(status=CallInsight.STATUS_FAILED, retries__lt=MAX_RETRIES)
+        | Q(status=CallInsight.STATUS_PROCESSING, last_attempt_at__lt=cutoff_stuck)
+    ).order_by('last_attempt_at')[:30]
+
+    for row in candidates.iterator():
+        if not _next_attempt_due(row.retries, row.last_attempt_at):
+            stats['skipped_backoff'] += 1
+            continue
+        try:
+            extract_call_insights(row.contact_id, force=True)
+            row.refresh_from_db(fields=['status'])
+            if row.status == CallInsight.STATUS_DONE:
+                stats['recovered'] += 1
+            else:
+                stats['failed_again'] += 1
+        except Exception as e:
+            stats['failed_again'] += 1
+            logger.warning('CallInsight retry failed for %s: %s', row.pk, e)
+
+    stats['dead'] += CallInsight.objects.filter(
+        status=CallInsight.STATUS_FAILED,
+        retries__gte=MAX_RETRIES,
+    ).count()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Pipeline 5 — Telegram delivery for done insights
+# ──────────────────────────────────────────────────────────────────────────
+def _retry_insight_telegram(stats):
+    from .models import CallInsight
+    from .insights import _send_telegram_async
+    import threading
+
+    candidates = CallInsight.objects.filter(
+        status=CallInsight.STATUS_DONE,
+        telegram_status=CallInsight.TELEGRAM_FAILED,
+        telegram_retries__lt=MAX_RETRIES,
+    ).order_by('telegram_last_attempt_at')[:25]
+
+    for row in candidates.iterator():
+        if not _next_attempt_due(row.telegram_retries, row.telegram_last_attempt_at):
+            stats['skipped_backoff'] += 1
+            continue
+        try:
+            threading.Thread(
+                target=_send_telegram_async,
+                args=(row.pk,),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            stats['failed_again'] += 1
+            logger.warning('Telegram insight retry queue failed %s: %s', row.pk, e)
+
+    stats['dead'] += CallInsight.objects.filter(
+        status=CallInsight.STATUS_DONE,
+        telegram_status=CallInsight.TELEGRAM_FAILED,
+        telegram_retries__gte=MAX_RETRIES,
+    ).count()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Pipeline 6 — Aggregate insight reports (cross-call clustering)
+# ──────────────────────────────────────────────────────────────────────────
+def _retry_insight_aggregates(stats):
+    from django.db.models import Q
+    from .models import InsightAggregate
+    from .aggregation import enqueue_aggregate
+
+    cutoff_stuck = timezone.now() - timedelta(minutes=STUCK_PROCESSING_MINUTES)
+
+    candidates = InsightAggregate.objects.filter(
+        Q(status=InsightAggregate.STATUS_FAILED, retries__lt=MAX_RETRIES)
+        | Q(status=InsightAggregate.STATUS_PROCESSING, last_attempt_at__lt=cutoff_stuck)
+        | Q(status=InsightAggregate.STATUS_PENDING, last_attempt_at__lt=cutoff_stuck)
+    ).order_by('last_attempt_at')[:20]
+
+    for row in candidates.iterator():
+        if not _next_attempt_due(row.retries, row.last_attempt_at):
+            stats['skipped_backoff'] += 1
+            continue
+        try:
+            InsightAggregate.objects.filter(pk=row.pk).update(
+                status=InsightAggregate.STATUS_PENDING,
+                last_attempt_at=timezone.now(),
+            )
+            enqueue_aggregate(row.pk)
+            stats['recovered'] += 1
+        except Exception as e:
+            stats['failed_again'] += 1
+            logger.warning('InsightAggregate retry failed for %s: %s', row.pk, e)
+
+    stats['dead'] += InsightAggregate.objects.filter(
+        status=InsightAggregate.STATUS_FAILED,
+        retries__gte=MAX_RETRIES,
+    ).count()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Pipeline 7 — Producer Weekly Reports
+# ──────────────────────────────────────────────────────────────────────────
+def _retry_producer_weekly_reports(stats):
+    from django.db.models import Q
+    from producers.models import ProducerWeeklyReport
+    from producers.weekly_report import enqueue_weekly_report
+
+    cutoff_stuck = timezone.now() - timedelta(minutes=STUCK_PROCESSING_MINUTES)
+
+    candidates = ProducerWeeklyReport.objects.filter(
+        Q(status=ProducerWeeklyReport.STATUS_FAILED, retries__lt=MAX_RETRIES)
+        | Q(status=ProducerWeeklyReport.STATUS_PROCESSING, last_attempt_at__lt=cutoff_stuck)
+        | Q(status=ProducerWeeklyReport.STATUS_PENDING, last_attempt_at__lt=cutoff_stuck)
+    ).order_by('last_attempt_at')[:10]
+
+    for row in candidates.iterator():
+        if not _next_attempt_due(row.retries, row.last_attempt_at):
+            stats['skipped_backoff'] += 1
+            continue
+        try:
+            ProducerWeeklyReport.objects.filter(pk=row.pk).update(
+                status=ProducerWeeklyReport.STATUS_PENDING,
+                last_attempt_at=timezone.now(),
+            )
+            enqueue_weekly_report(row.pk)
+            stats['recovered'] += 1
+        except Exception as e:
+            stats['failed_again'] += 1
+            logger.warning('ProducerWeeklyReport retry failed for %s: %s', row.pk, e)
+
+    stats['dead'] += ProducerWeeklyReport.objects.filter(
+        status=ProducerWeeklyReport.STATUS_FAILED,
+        retries__gte=MAX_RETRIES,
+    ).count()
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Public entry point
 # ──────────────────────────────────────────────────────────────────────────
 def run_ai_self_healing():
     """
-    One full healing pass over all three pipelines.
+    One full healing pass over all pipelines.
     Returns a dict with totals so the caller can record a 1-line summary.
     """
     close_old_connections()
@@ -310,6 +473,22 @@ def run_ai_self_healing():
         _retry_feedback(stats)
     except Exception as e:
         logger.exception('Self-healing feedback stage crashed: %s', e)
+    try:
+        _retry_call_insights(stats)
+    except Exception as e:
+        logger.exception('Self-healing call insights stage crashed: %s', e)
+    try:
+        _retry_insight_telegram(stats)
+    except Exception as e:
+        logger.exception('Self-healing insight telegram stage crashed: %s', e)
+    try:
+        _retry_insight_aggregates(stats)
+    except Exception as e:
+        logger.exception('Self-healing insight aggregates stage crashed: %s', e)
+    try:
+        _retry_producer_weekly_reports(stats)
+    except Exception as e:
+        logger.exception('Self-healing producer weekly reports stage crashed: %s', e)
     finally:
         close_old_connections()
     return stats
@@ -317,7 +496,8 @@ def run_ai_self_healing():
 
 def dead_ended_summary():
     """Return counts of rows that exhausted MAX_RETRIES — for the admin panel."""
-    from .models import Contact, OperatorFeedback
+    from .models import Contact, OperatorFeedback, CallInsight, InsightAggregate
+    from producers.models import ProducerWeeklyReport
     return {
         'transcriptions': Contact.objects.filter(
             transcription_status=Contact.TRANSCRIPTION_FAILED,
@@ -330,5 +510,22 @@ def dead_ended_summary():
         'feedback': OperatorFeedback.objects.filter(
             status=OperatorFeedback.STATUS_FAILED,
             generation_retries__gte=MAX_RETRIES,
+        ).count(),
+        'call_insights': CallInsight.objects.filter(
+            status=CallInsight.STATUS_FAILED,
+            retries__gte=MAX_RETRIES,
+        ).count(),
+        'insight_telegram': CallInsight.objects.filter(
+            status=CallInsight.STATUS_DONE,
+            telegram_status=CallInsight.TELEGRAM_FAILED,
+            telegram_retries__gte=MAX_RETRIES,
+        ).count(),
+        'insight_aggregates': InsightAggregate.objects.filter(
+            status=InsightAggregate.STATUS_FAILED,
+            retries__gte=MAX_RETRIES,
+        ).count(),
+        'producer_weekly_reports': ProducerWeeklyReport.objects.filter(
+            status=ProducerWeeklyReport.STATUS_FAILED,
+            retries__gte=MAX_RETRIES,
         ).count(),
     }

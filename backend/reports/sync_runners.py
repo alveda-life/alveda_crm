@@ -68,6 +68,34 @@ def run_crm_partners_sync():
             cur.execute("SELECT pg_advisory_unlock(%s)", [_CRM_PARTNERS_SYNC_LOCK_KEY])
 
 
+# ── Producer Weekly Report (Fri 16:00 IST) ────────────────────────────────
+@logged_job('producer_onboarding_weekly_report')
+def run_producer_weekly_report():
+    """
+    Build the AI-generated Producer Weekly Report covering the period since
+    the previous DONE report. Period is chained, not aligned to a calendar
+    week, so a missed Friday is automatically picked up on the next run.
+    """
+    from producers.weekly_report import create_and_run_weekly_report
+    row = create_and_run_weekly_report(triggered_by='scheduled')
+    return f'Enqueued ProducerWeeklyReport id={row.pk} ({row.period_from} → {row.period_to})'
+
+
+# ── General Insights rolling refresh (30d / 60d / 180d / all) ─────────────
+@logged_job('general_insights_refresh')
+def run_general_insights_refresh():
+    """
+    Refresh the rolling General Insights buckets so the Partners → General
+    Insights page always has fresh top-15 themes ready to display.
+
+    The actual generation runs in background daemon threads spawned by
+    `find_or_create_rolling`; this job just enqueues all four kinds.
+    """
+    from contacts.aggregation import refresh_all_rolling
+    kinds = refresh_all_rolling()
+    return f'Refresh queued: {", ".join(kinds)}'
+
+
 # ── Maintenance: continuous self-healing of the AI pipeline ────────────────
 @logged_job('ai_self_healing')
 def run_ai_self_healing_job():

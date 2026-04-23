@@ -94,6 +94,29 @@ def gather_partners_snapshot():
         missed=Count('id', filter=Q(is_missed_call=True)),
         callbacks=Count('id', filter=Q(callback_later=True)),
     )
+    transcribed = c_all.filter(transcription_status=Contact.TRANSCRIPTION_DONE)
+    transcript_stats = transcribed.aggregate(
+        done_total=Count('id'),
+        done_last_30d=Count('id', filter=Q(date__gte=last_30)),
+        with_summary=Count('id', filter=~Q(summary='')),
+        with_any_text=Count('id', filter=(~Q(diarized_transcript='') | ~Q(transcription=''))),
+    )
+    transcript_rows = []
+    for c in transcribed.select_related('partner', 'created_by').order_by('-date')[:20]:
+        text = (c.diarized_transcript or c.transcription or '').strip()
+        if not text:
+            continue
+        excerpt = ' '.join(text.split())
+        if len(excerpt) > 900:
+            excerpt = excerpt[:897] + '...'
+        transcript_rows.append({
+            'contact_id': c.id,
+            'date': c.date.isoformat() if c.date else None,
+            'partner': c.partner.name if c.partner_id else 'Unknown',
+            'operator': (c.created_by.get_full_name() or c.created_by.username) if c.created_by_id else 'Unknown',
+            'transcript_excerpt': excerpt,
+            'summary': (c.summary or '').strip()[:500],
+        })
 
     return {
         'snapshot_date': now.strftime('%Y-%m-%d %H:%M UTC'),
@@ -118,6 +141,13 @@ def gather_partners_snapshot():
             'calls':     c30_team['calls']     or 0,
             'missed':    c30_team['missed']    or 0,
             'callbacks': c30_team['callbacks'] or 0,
+        },
+        'transcriptions': {
+            'done_total': transcript_stats['done_total'] or 0,
+            'done_last_30d': transcript_stats['done_last_30d'] or 0,
+            'with_summary': transcript_stats['with_summary'] or 0,
+            'with_any_text': transcript_stats['with_any_text'] or 0,
+            'recent_call_excerpts': transcript_rows,
         },
         'tasks': task_snap,
         'operators': op_rows,
@@ -187,6 +217,7 @@ The CRM tracks:
 • Funnel stages: New → Agreed to Create First Set → Set Created → Has Sale → (dead: No Answer / Declined / No Sales)
 • Operators — CRM managers who call and support partners
 • Calls/contacts recorded in the system
+• Transcription excerpts and call summaries from processed calls
 • Tasks for operators
 • Financial metrics (revenue, orders, medical sets)
 
@@ -198,6 +229,8 @@ Rules for generating reports:
 5. Always end with a "## Key Recommendations" section with 3-5 actionable points
 6. Be specific — mention names, numbers, percentages from the data
 7. If the user asks for a specific time period you don't have granular data for, use the available 30-day and 7-day windows and note the limitation
+8. If transcription excerpts are provided and relevant, cite concrete phrases/patterns from them in your analysis
+9. Never claim you lack access to call transcriptions or cannot see them when the JSON snapshot includes a `transcriptions` block with `done_total > 0` or any `recent_call_excerpts` entries — you MUST use that material for call-related questions.
 
 Current Partners CRM snapshot ({snapshot_date}):
 {crm_json}
@@ -570,7 +603,7 @@ class AiOperationsDeadEndedView(APIView):
     def get(self, request):
         if not _is_admin(request.user):
             return Response({'error': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
-        from contacts.models import Contact, OperatorFeedback
+        from contacts.models import Contact, OperatorFeedback, CallInsight, InsightAggregate
         from contacts.auto_retry import MAX_RETRIES
 
         def _short(s, n=240):
@@ -616,10 +649,75 @@ class AiOperationsDeadEndedView(APIView):
             generation_retries__gte=MAX_RETRIES,
         ).select_related('operator').order_by('-last_attempt_at')[:100]]
 
+        call_insights = [{
+            'id': ci.id,
+            'contact_id': ci.contact_id,
+            'partner': ci.partner.name if ci.partner_id else '—',
+            'date': ci.call_date.isoformat() if ci.call_date else None,
+            'retries': ci.retries,
+            'last_error': _short(ci.last_error),
+            'last_attempt_at': ci.last_attempt_at.isoformat() if ci.last_attempt_at else None,
+        } for ci in CallInsight.objects.filter(
+            status=CallInsight.STATUS_FAILED,
+            retries__gte=MAX_RETRIES,
+        ).select_related('partner').order_by('-last_attempt_at')[:100]]
+
+        insight_telegram = [{
+            'id': ci.id,
+            'contact_id': ci.contact_id,
+            'partner': ci.partner.name if ci.partner_id else '—',
+            'date': ci.call_date.isoformat() if ci.call_date else None,
+            'retries': ci.telegram_retries,
+            'last_error': _short(ci.telegram_last_error),
+            'last_attempt_at': ci.telegram_last_attempt_at.isoformat()
+                               if ci.telegram_last_attempt_at else None,
+        } for ci in CallInsight.objects.filter(
+            status=CallInsight.STATUS_DONE,
+            telegram_status=CallInsight.TELEGRAM_FAILED,
+            telegram_retries__gte=MAX_RETRIES,
+        ).select_related('partner').order_by('-telegram_last_attempt_at')[:100]]
+
+        insight_aggregates = [{
+            'id': agg.id,
+            'date_from': agg.date_from.isoformat() if agg.date_from else None,
+            'date_to': agg.date_to.isoformat() if agg.date_to else None,
+            'retries': agg.retries,
+            'last_error': _short(agg.last_error),
+            'last_attempt_at': agg.last_attempt_at.isoformat() if agg.last_attempt_at else None,
+            'created_by': (
+                agg.created_by.full_name or agg.created_by.username
+                if agg.created_by_id else '—'
+            ),
+        } for agg in InsightAggregate.objects.filter(
+            status=InsightAggregate.STATUS_FAILED,
+            retries__gte=MAX_RETRIES,
+        ).select_related('created_by').order_by('-last_attempt_at')[:100]]
+
+        from producers.models import ProducerWeeklyReport
+        producer_weekly_reports = [{
+            'id': r.id,
+            'period_from': r.period_from.isoformat() if r.period_from else None,
+            'period_to': r.period_to.isoformat() if r.period_to else None,
+            'retries': r.retries,
+            'last_error': _short(r.last_error),
+            'last_attempt_at': r.last_attempt_at.isoformat() if r.last_attempt_at else None,
+            'created_by': (
+                r.created_by.full_name or r.created_by.username
+                if r.created_by_id else '—'
+            ),
+        } for r in ProducerWeeklyReport.objects.filter(
+            status=ProducerWeeklyReport.STATUS_FAILED,
+            retries__gte=MAX_RETRIES,
+        ).select_related('created_by').order_by('-last_attempt_at')[:100]]
+
         return Response({
             'transcriptions': transcriptions,
             'summaries': summaries,
             'feedback': feedback,
+            'call_insights': call_insights,
+            'insight_telegram': insight_telegram,
+            'insight_aggregates': insight_aggregates,
+            'producer_weekly_reports': producer_weekly_reports,
         })
 
     def post(self, request):
@@ -627,7 +725,7 @@ class AiOperationsDeadEndedView(APIView):
             return Response({'error': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
         kind = request.data.get('kind')
         item_id = request.data.get('id')
-        from contacts.models import Contact, OperatorFeedback
+        from contacts.models import Contact, OperatorFeedback, CallInsight, InsightAggregate
         if kind == 'transcription':
             updated = Contact.objects.filter(pk=item_id).update(
                 transcription_retries=0, transcription_last_error='',
@@ -640,6 +738,35 @@ class AiOperationsDeadEndedView(APIView):
             updated = OperatorFeedback.objects.filter(pk=item_id).update(
                 generation_retries=0, last_error='',
             )
+        elif kind == 'call_insight':
+            updated = CallInsight.objects.filter(pk=item_id).update(
+                retries=0, last_error='',
+            )
+        elif kind == 'insight_telegram':
+            updated = CallInsight.objects.filter(pk=item_id).update(
+                telegram_retries=0,
+                telegram_last_error='',
+                telegram_status=CallInsight.TELEGRAM_PENDING,
+            )
+        elif kind == 'insight_aggregate':
+            updated = InsightAggregate.objects.filter(pk=item_id).update(
+                retries=0, last_error='',
+                status=InsightAggregate.STATUS_PENDING,
+                last_attempt_at=timezone.now(),
+            )
+            if updated:
+                from contacts.aggregation import enqueue_aggregate
+                enqueue_aggregate(int(item_id))
+        elif kind == 'producer_weekly_report':
+            from producers.models import ProducerWeeklyReport
+            updated = ProducerWeeklyReport.objects.filter(pk=item_id).update(
+                retries=0, last_error='',
+                status=ProducerWeeklyReport.STATUS_PENDING,
+                last_attempt_at=timezone.now(),
+            )
+            if updated:
+                from producers.weekly_report import enqueue_weekly_report
+                enqueue_weekly_report(int(item_id))
         else:
             return Response({'error': 'Bad kind'}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'reset': bool(updated)})

@@ -218,7 +218,7 @@
                 <q-item-section side>
                   <q-btn outline dense no-caps size="sm" color="primary"
                          icon="restart_alt" label="Reset"
-                         :loading="resetting[`t-${row.id}`]"
+                         :loading="resetting[`transcription-${row.id}`]"
                          @click="resetItem('transcription', row.id)" />
                 </q-item-section>
               </q-item>
@@ -240,7 +240,7 @@
                 <q-item-section side>
                   <q-btn outline dense no-caps size="sm" color="primary"
                          icon="restart_alt" label="Reset"
-                         :loading="resetting[`s-${row.id}`]"
+                         :loading="resetting[`summary-${row.id}`]"
                          @click="resetItem('summary', row.id)" />
                 </q-item-section>
               </q-item>
@@ -261,8 +261,96 @@
                 <q-item-section side>
                   <q-btn outline dense no-caps size="sm" color="primary"
                          icon="restart_alt" label="Reset"
-                         :loading="resetting[`f-${row.id}`]"
+                         :loading="resetting[`feedback-${row.id}`]"
                          @click="resetItem('feedback', row.id)" />
+                </q-item-section>
+              </q-item>
+            </q-list>
+
+            <div class="text-weight-bold q-mb-xs">
+              Call insights <span class="text-grey-6">({{ dead.call_insights?.length || 0 }})</span>
+            </div>
+            <div v-if="!(dead.call_insights || []).length" class="text-grey-5 q-mb-md">— none —</div>
+            <q-list v-else dense separator class="q-mb-md">
+              <q-item v-for="row in dead.call_insights" :key="`ci-${row.id}`">
+                <q-item-section>
+                  <q-item-label>
+                    <b>insight #{{ row.id }}</b> · contact #{{ row.contact_id }} · {{ row.partner }}
+                    <span class="text-grey-6 q-ml-sm">{{ fmtAbsolute(row.date) }}</span>
+                  </q-item-label>
+                  <q-item-label caption class="text-red-7">{{ row.last_error }}</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-btn outline dense no-caps size="sm" color="primary"
+                         icon="restart_alt" label="Reset"
+                         :loading="resetting[`call_insight-${row.id}`]"
+                         @click="resetItem('call_insight', row.id)" />
+                </q-item-section>
+              </q-item>
+            </q-list>
+
+            <div class="text-weight-bold q-mb-xs">
+              Insight Telegram <span class="text-grey-6">({{ dead.insight_telegram?.length || 0 }})</span>
+            </div>
+            <div v-if="!(dead.insight_telegram || []).length" class="text-grey-5 q-mb-md">— none —</div>
+            <q-list v-else dense separator class="q-mb-md">
+              <q-item v-for="row in dead.insight_telegram" :key="`it-${row.id}`">
+                <q-item-section>
+                  <q-item-label>
+                    <b>insight #{{ row.id }}</b> · contact #{{ row.contact_id }} · {{ row.partner }}
+                    <span class="text-grey-6 q-ml-sm">{{ fmtAbsolute(row.date) }}</span>
+                  </q-item-label>
+                  <q-item-label caption class="text-red-7">{{ row.last_error }}</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-btn outline dense no-caps size="sm" color="primary"
+                         icon="restart_alt" label="Reset"
+                         :loading="resetting[`insight_telegram-${row.id}`]"
+                         @click="resetItem('insight_telegram', row.id)" />
+                </q-item-section>
+              </q-item>
+            </q-list>
+
+            <div class="text-weight-bold q-mb-xs">
+              Insight aggregates <span class="text-grey-6">({{ dead.insight_aggregates?.length || 0 }})</span>
+            </div>
+            <div v-if="!(dead.insight_aggregates || []).length" class="text-grey-5 q-mb-md">— none —</div>
+            <q-list v-else dense separator>
+              <q-item v-for="row in dead.insight_aggregates" :key="`ia-${row.id}`">
+                <q-item-section>
+                  <q-item-label>
+                    <b>aggregate #{{ row.id }}</b> · {{ row.date_from }} → {{ row.date_to }}
+                    <span class="text-grey-6 q-ml-sm">by {{ row.created_by }}</span>
+                  </q-item-label>
+                  <q-item-label caption class="text-red-7">{{ row.last_error }}</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-btn outline dense no-caps size="sm" color="primary"
+                         icon="restart_alt" label="Reset"
+                         :loading="resetting[`insight_aggregate-${row.id}`]"
+                         @click="resetItem('insight_aggregate', row.id)" />
+                </q-item-section>
+              </q-item>
+            </q-list>
+
+            <div class="text-weight-bold q-mb-xs">
+              Producer Weekly Reports <span class="text-grey-6">({{ dead.producer_weekly_reports?.length || 0 }})</span>
+            </div>
+            <div v-if="!(dead.producer_weekly_reports || []).length" class="text-grey-5 q-mb-md">— none —</div>
+            <q-list v-else dense separator>
+              <q-item v-for="row in dead.producer_weekly_reports" :key="`pwr-${row.id}`">
+                <q-item-section>
+                  <q-item-label>
+                    <b>report #{{ row.id }}</b> · {{ row.period_from }} → {{ row.period_to }}
+                    <span class="text-grey-6 q-ml-sm">by {{ row.created_by }}</span>
+                  </q-item-label>
+                  <q-item-label caption class="text-red-7">{{ row.last_error }}</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-btn outline dense no-caps size="sm" color="primary"
+                         icon="restart_alt" label="Reset"
+                         :loading="resetting[`producer_weekly_report-${row.id}`]"
+                         @click="resetItem('producer_weekly_report', row.id)" />
                 </q-item-section>
               </q-item>
             </q-list>
@@ -329,8 +417,16 @@ const historyOpen = ref(false)
 const historyJob  = ref(null)
 const deadOpen    = ref(false)
 const deadLoading = ref(false)
-const dead        = ref({ transcriptions: [], summaries: [], feedback: [] })
-const deadCounts  = ref({ transcriptions: 0, summaries: 0, feedback: 0 })
+const dead        = ref({
+  transcriptions: [], summaries: [], feedback: [],
+  call_insights: [], insight_telegram: [], insight_aggregates: [],
+  producer_weekly_reports: [],
+})
+const deadCounts  = ref({
+  transcriptions: 0, summaries: 0, feedback: 0,
+  call_insights: 0, insight_telegram: 0, insight_aggregates: 0,
+  producer_weekly_reports: 0,
+})
 const maxRetries  = ref(5)
 const resetting   = reactive({})
 let pollTimer = null
@@ -339,6 +435,10 @@ const deadTotal = computed(() =>
   (deadCounts.value.transcriptions || 0)
   + (deadCounts.value.summaries || 0)
   + (deadCounts.value.feedback || 0)
+  + (deadCounts.value.call_insights || 0)
+  + (deadCounts.value.insight_telegram || 0)
+  + (deadCounts.value.insight_aggregates || 0)
+  + (deadCounts.value.producer_weekly_reports || 0)
 )
 
 const CATEGORIES = [
@@ -393,9 +493,13 @@ async function loadDead() {
     const res = await api.get('/ai-operations/dead-ended/')
     dead.value = res.data
     deadCounts.value = {
-      transcriptions: res.data.transcriptions.length,
-      summaries:      res.data.summaries.length,
-      feedback:       res.data.feedback.length,
+      transcriptions: res.data.transcriptions?.length || 0,
+      summaries:      res.data.summaries?.length || 0,
+      feedback:       res.data.feedback?.length || 0,
+      call_insights:  res.data.call_insights?.length || 0,
+      insight_telegram: res.data.insight_telegram?.length || 0,
+      insight_aggregates: res.data.insight_aggregates?.length || 0,
+      producer_weekly_reports: res.data.producer_weekly_reports?.length || 0,
     }
   } catch (e) {
     $q.notify({ type: 'negative', message: 'Failed to load dead-ended items' })
@@ -410,7 +514,7 @@ function openDeadDialog() {
 }
 
 async function resetItem(kind, id) {
-  const key = `${kind[0]}-${id}`
+  const key = `${kind}-${id}`
   resetting[key] = true
   try {
     await api.post('/ai-operations/dead-ended/', { kind, id })

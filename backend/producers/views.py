@@ -10,10 +10,11 @@ from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Producer, ProducerTask, ProducerComment
+from .models import Producer, ProducerTask, ProducerComment, ProducerWeeklyReport
 from .serializers import (
     ProducerListSerializer, ProducerDetailSerializer, ProducerWriteSerializer,
     ProducerTaskSerializer, ProducerTaskGlobalSerializer, ProducerCommentSerializer,
+    ProducerWeeklyReportListSerializer, ProducerWeeklyReportDetailSerializer,
 )
 from accounts.models import RolePermission
 
@@ -787,3 +788,79 @@ class ProducerAnalyticsView(APIView):
             'task_stats':             task_stats,
             'weekly_comments':        comment_weeks,
         })
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Producer Weekly Report — AI-generated onboarding-funnel summary.
+# Visible to admins and anyone with producers_onboarding.view (e.g. Producer
+# Manager role). Background generation triggered by scheduler (Fri 16:00 IST)
+# or by the manual "Refresh" button.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _can_view_weekly_report(user) -> bool:
+    return _is_admin(user) or _can(user, 'producers_onboarding', 'view')
+
+
+class ProducerWeeklyReportViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [IsAuthenticated]
+    queryset = ProducerWeeklyReport.objects.select_related('created_by').all()
+    serializer_class = ProducerWeeklyReportDetailSerializer
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ProducerWeeklyReportListSerializer
+        return ProducerWeeklyReportDetailSerializer
+
+    def get_queryset(self):
+        if not _can_view_weekly_report(self.request.user):
+            return ProducerWeeklyReport.objects.none()
+        return ProducerWeeklyReport.objects.select_related('created_by').all()
+
+    @action(detail=False, methods=['get'], url_path='latest')
+    def latest(self, request):
+        if not _can_view_weekly_report(request.user):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        latest = (
+            ProducerWeeklyReport.objects
+            .filter(status=ProducerWeeklyReport.STATUS_DONE)
+            .order_by('-period_to').first()
+        )
+        if not latest:
+            inflight = (
+                ProducerWeeklyReport.objects
+                .exclude(status=ProducerWeeklyReport.STATUS_DONE)
+                .order_by('-created_at').first()
+            )
+            if inflight:
+                return Response(ProducerWeeklyReportDetailSerializer(inflight).data)
+            return Response({'detail': 'No reports yet'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ProducerWeeklyReportDetailSerializer(latest).data)
+
+    @action(detail=False, methods=['post'], url_path='refresh')
+    def refresh(self, request):
+        """Manually trigger a new weekly-report generation right now."""
+        if not _can_view_weekly_report(request.user):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        from .weekly_report import create_and_run_weekly_report
+        try:
+            row = create_and_run_weekly_report(triggered_by='manual', user=request.user)
+        except Exception as e:
+            return Response({'detail': 'Failed to enqueue: %s' % e}, status=500)
+        return Response(ProducerWeeklyReportDetailSerializer(row).data, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=['post'], url_path='retry')
+    def retry(self, request, pk=None):
+        """Re-run a failed report. Admin only."""
+        if not _is_admin(request.user):
+            return Response({'detail': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+        report = self.get_object()
+        from .weekly_report import enqueue_weekly_report
+        ProducerWeeklyReport.objects.filter(pk=report.pk).update(
+            status=ProducerWeeklyReport.STATUS_PENDING,
+            last_attempt_at=timezone.now(),
+            last_error='',
+        )
+        enqueue_weekly_report(report.pk)
+        report.refresh_from_db()
+        return Response(ProducerWeeklyReportDetailSerializer(report).data, status=status.HTTP_202_ACCEPTED)

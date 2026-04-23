@@ -43,6 +43,8 @@ def _gather_brand_history(producer, current_week_monday):
     Gather full comment history for one brand grouped by week.
     Fills EVERY week between the first comment (or producer creation) and `current_week_monday`,
     even if the brand had zero activity that week (empty list).
+
+    Returns a tuple (history_by_week, start_monday).
     """
     from producers.models import ProducerComment
     comments = list(
@@ -59,13 +61,17 @@ def _gather_brand_history(producer, current_week_monday):
             'text': (c.text or '')[:400],
         })
 
-    # Determine the start week: earliest comment's week, fallback to producer.created_at
+    # Determine the start week: EARLIEST of (producer.created_at, first comment).
+    # Producer.created_at is when work on the funnel started; using the min
+    # guarantees we count every week we have been "onboarding" them.
+    candidate_dts = []
+    if producer.created_at:
+        candidate_dts.append(producer.created_at.astimezone(IST_TZ))
     if comments:
-        first_dt = comments[0].created_at.astimezone(IST_TZ)
-    elif producer.created_at:
-        first_dt = producer.created_at.astimezone(IST_TZ)
-    else:
-        first_dt = datetime.now(IST_TZ)
+        candidate_dts.append(comments[0].created_at.astimezone(IST_TZ))
+    if not candidate_dts:
+        candidate_dts.append(datetime.now(IST_TZ))
+    first_dt = min(candidate_dts)
     start_monday = (first_dt - timedelta(days=first_dt.weekday())).date()
 
     # Fill every Monday between start_monday and current_week_monday inclusive.
@@ -74,7 +80,19 @@ def _gather_brand_history(producer, current_week_monday):
         by_week.setdefault(cursor.isoformat(), [])
         cursor += timedelta(days=7)
 
-    return dict(sorted(by_week.items()))
+    return dict(sorted(by_week.items())), start_monday
+
+
+def _weeks_in_funnel(start_monday, current_monday):
+    """Inclusive count of weeks the producer has been in the funnel.
+
+    Both args are dates of the Monday of the respective weeks (IST).
+    Always >= 1 (the first week itself counts).
+    """
+    if not start_monday:
+        return 1
+    days = (current_monday - start_monday).days
+    return max(1, days // 7 + 1)
 
 
 SYSTEM_PROMPT = """You are a factual deal-log writer for our Ayurveda manufacturer onboarding team.
@@ -417,7 +435,10 @@ def _run_generation(report_pk):
 
         brand_data = {}
         for p in brands:
-            history = _gather_brand_history(p, current_monday)
+            history, start_monday = _gather_brand_history(p, current_monday)
+            weeks_in_funnel = _weeks_in_funnel(start_monday, current_monday)
+            funnel_started_at = start_monday.isoformat() if start_monday else None
+
             if not history:
                 brand_data[str(p.pk)] = {
                     'name': p.name,
@@ -425,6 +446,8 @@ def _run_generation(report_pk):
                     'stage_key': p.stage,
                     'weeks': {},
                     'current_status': 'No comments yet',
+                    'weeks_in_funnel': weeks_in_funnel,
+                    'funnel_started_at': funnel_started_at,
                 }
                 continue
 
@@ -451,6 +474,8 @@ def _run_generation(report_pk):
                 'weeks': normalized_weeks,
                 'current_status': ai_result.get('current_status', ''),
                 'readiness_percent': readiness,
+                'weeks_in_funnel': weeks_in_funnel,
+                'funnel_started_at': funnel_started_at,
             }
 
         BrandSituationReport.objects.filter(pk=report_pk).update(

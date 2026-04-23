@@ -241,5 +241,17 @@ export const usePartnersStore = defineStore('partners', {
       const res = await api.post(`/contacts/${id}/retry-summary/`)
       return res.data
     },
+
+    async retryCallInsights(id) {
+      const res = await api.post(`/contacts/${id}/retry-insights/`)
+      return res.data
+    },
+
+    async fetchPartnerCallInsights(partnerId) {
+      const res = await api.get('/call-insights/', {
+        params: { partner: partnerId, page_size: 100, ordering: '-call_date' },
+      })
+      return res.data.results || res.data
+    },
   },
 })

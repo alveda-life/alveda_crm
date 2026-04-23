@@ -265,6 +265,10 @@ const partnerNavItems = computed(() => {
     items.push({ path: '/ai-report', label: 'AI Report',  icon: 'auto_awesome' })
   }
   if (authStore.isAdmin) {
+    items.push({ path: '/admin/general-insights', label: 'General Insights', icon: 'insights' })
+    items.push({ path: '/admin/call-insights', label: 'Call Insights', icon: 'lightbulb' })
+  }
+  if (authStore.isAdmin) {
     items.push({ path: '/transcriptions', label: 'Transcriptions', icon: 'mic' })
   }
   items.push({ path: '/my-feedback', label: 'My Feedback', icon: 'rate_review' })
@@ -291,6 +295,7 @@ const producerNavItems = computed(() => {
   }
   if (showProducerOnboardingNav.value) items.push({ path: '/producers/analytics',  label: 'Analytics',  icon: 'analytics' })
   if (showProducerOnboardingNav.value) items.push({ path: '/producers/general-situation', label: 'General Situation', icon: 'leaderboard' })
+  if (showProducerOnboardingNav.value) items.push({ path: '/producers/weekly-report', label: 'Weekly Report', icon: 'event_note' })
   if (authStore.isAdmin) items.push({ path: '/producers/ai-report', label: 'AI Report',  icon: 'auto_awesome' })
   if (authStore.isAdmin) items.push({ path: '/producers/updates', label: 'Updates', icon: 'update' })
   return items
@@ -331,12 +336,15 @@ const pageTitles = {
   '/producers/ai-report':  'Producer AI Report',
   '/producers/updates':    'Producer Updates',
   '/producers/general-situation': 'General Situation',
+  '/producers/weekly-report':     'Producer Weekly Report',
   '/transcriptions':       'Transcriptions',
   '/call-quality':         'AI Call Quality',
   '/my-feedback':          'My Feedback',
   '/admin/users':          'User Management',
   '/admin/settings':       'AI Settings',
   '/admin/ai-operations':  'Background Operations',
+  '/admin/call-insights':  'Call Insights',
+  '/admin/general-insights': 'General Insights',
   '/permissions':          'Access Permissions',
 }
 

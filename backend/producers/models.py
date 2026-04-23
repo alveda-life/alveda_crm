@@ -228,3 +228,74 @@ class ProducerComment(models.Model):
 
     def __str__(self):
         return f'Comment by {self.author_id} on {self.producer_id}'
+
+
+class ProducerWeeklyReport(models.Model):
+    """
+    AI-generated weekly snapshot of the onboarding funnel.
+
+    Period semantics:
+      - period_from = period_to of the previous DONE report (chained, not aligned to a calendar week).
+      - period_to   = the moment the build started.
+      - First-ever run falls back to (period_to - 7 days) so we have something to summarise.
+
+    Significance filter:
+      - LLM is asked to drop trivial movements ("reminded", "called again",
+        "asked for contact") and only surface meaningful onboarding-funnel
+        changes (stage progression, terms, blockers, decisions, refusals).
+    """
+    STATUS_PENDING    = 'pending'
+    STATUS_PROCESSING = 'processing'
+    STATUS_DONE       = 'done'
+    STATUS_FAILED     = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_PENDING,    'Pending'),
+        (STATUS_PROCESSING, 'Processing'),
+        (STATUS_DONE,       'Done'),
+        (STATUS_FAILED,     'Failed'),
+    ]
+
+    TRIGGER_SCHEDULED = 'scheduled'
+    TRIGGER_MANUAL    = 'manual'
+    TRIGGER_CHOICES = [
+        (TRIGGER_SCHEDULED, 'Scheduled (Fri 16:00 IST)'),
+        (TRIGGER_MANUAL,    'Manual refresh'),
+    ]
+
+    period_from = models.DateTimeField(db_index=True)
+    period_to   = models.DateTimeField(db_index=True)
+
+    triggered_by = models.CharField(max_length=20, choices=TRIGGER_CHOICES, default=TRIGGER_SCHEDULED)
+    created_by   = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='producer_weekly_reports_created')
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES,
+                              default=STATUS_PENDING, db_index=True)
+
+    total_new_producers       = models.PositiveIntegerField(default=0)
+    total_changed_producers   = models.PositiveIntegerField(default=0)
+    total_comments_considered = models.PositiveIntegerField(default=0)
+
+    summary_text       = models.TextField(blank=True, help_text='Executive summary in English.')
+    new_producers_json = models.JSONField(default=list, blank=True,
+                                          help_text='Array of new-producer cards.')
+    changes_json       = models.JSONField(default=list, blank=True,
+                                          help_text='Array of significant change cards (LLM-filtered).')
+    rendered_markdown  = models.TextField(blank=True)
+
+    last_error       = models.TextField(blank=True)
+    retries          = models.PositiveSmallIntegerField(default=0)
+    last_attempt_at  = models.DateTimeField(null=True, blank=True)
+    completed_at     = models.DateTimeField(null=True, blank=True)
+    created_at       = models.DateTimeField(auto_now_add=True)
+    updated_at       = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-period_to', '-created_at']
+        indexes = [
+            models.Index(fields=['-period_to']),
+            models.Index(fields=['status', '-last_attempt_at']),
+        ]
+
+    def __str__(self):
+        return f'ProducerWeeklyReport {self.period_from:%Y-%m-%d} → {self.period_to:%Y-%m-%d} [{self.status}]'

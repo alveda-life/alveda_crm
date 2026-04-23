@@ -669,6 +669,90 @@
                       />
                     </div>
 
+                    <!-- Partner call insights (admin) -->
+                    <div
+                      v-if="authStore.isAdmin && contact.transcription_status === 'done'
+                        && (contact.diarized_transcript || contact.transcription)"
+                      class="q-mb-sm"
+                      style="background:#E0F7FA; border-left:3px solid #00838F; border-radius:0 8px 8px 0; padding:10px 14px;"
+                    >
+                      <div class="row items-center q-gutter-xs q-mb-xs">
+                        <q-icon name="lightbulb" size="14px" color="teal-9" />
+                        <span class="field-label" style="color:#006064;">Partner call insights</span>
+                        <q-space />
+                        <router-link
+                          v-if="insightByContactId[contact.id]?.id"
+                          :to="{ path: '/admin/call-insights', query: { contact: String(contact.id) } }"
+                          class="text-caption text-primary text-weight-medium"
+                          style="text-decoration:none;"
+                        >
+                          Open in list
+                        </router-link>
+                      </div>
+                      <div v-if="!insightByContactId[contact.id]" class="text-caption text-grey-7">
+                        Generating… refresh will update automatically.
+                      </div>
+                      <div v-else-if="insightByContactId[contact.id].status === 'pending'
+                        || insightByContactId[contact.id].status === 'processing'"
+                        class="row items-center q-gutter-xs"
+                      >
+                        <q-spinner-dots color="teal" size="18px" />
+                        <span class="text-caption text-teal-9">Extracting insights…</span>
+                      </div>
+                      <div v-else-if="insightByContactId[contact.id].status === 'failed'"
+                        class="row items-center justify-between"
+                      >
+                        <span class="text-caption text-negative">Insight extraction failed</span>
+                        <q-btn flat dense size="sm" color="negative" icon="refresh" label="Retry"
+                          :loading="retryingInsightContactId === contact.id"
+                          @click="retryCallInsights(contact)"
+                        />
+                      </div>
+                      <template v-else-if="insightByContactId[contact.id].status === 'done'">
+                        <div class="text-caption text-grey-7 q-mb-sm">
+                          {{ insightByContactId[contact.id].insight_count }} items
+                          <span v-if="insightByContactId[contact.id].density_bucket">
+                            · {{ insightByContactId[contact.id].density_bucket }} density
+                          </span>
+                        </div>
+                        <div v-if="insightItemsForContact(contact.id).length">
+                          <div
+                            v-for="(it, idx) in insightItemsForContact(contact.id).slice(0, expandedInsights.has(contact.id) ? 50 : 2)"
+                            :key="`${contact.id}-ins-${idx}`"
+                            class="q-mb-sm"
+                            style="background:#F2FDFF; border:1px solid #B2EBF2; border-radius:8px; padding:10px 12px;"
+                          >
+                            <div class="text-body2 text-weight-bold q-mb-xs" style="color:#004D40;">
+                              {{ idx + 1 }}. {{ it.title || 'Insight' }}
+                            </div>
+                            <div class="text-caption q-mb-xs" style="color:#006064;">
+                              {{ formatInsightCategory(it.category) }} · {{ formatInsightSentiment(it.sentiment) }}
+                            </div>
+                            <div class="text-body2 q-mb-xs" style="white-space:pre-wrap;">
+                              {{ it.detail_english }}
+                            </div>
+                            <div class="text-caption text-grey-8" style="white-space:pre-wrap;">
+                              <b>Partner quote:</b> {{ it.verbatim_partner_quote || '—' }}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          v-else
+                          class="summary-md"
+                          :class="expandedInsights.has(contact.id) ? '' : 'summary-collapsed'"
+                          v-html="renderMd(insightMarkdownForContact(contact.id))"
+                          style="font-size:13px;"
+                        />
+                        <q-btn flat dense size="xs" color="teal-9"
+                          :icon="expandedInsights.has(contact.id) ? 'expand_less' : 'expand_more'"
+                          :label="expandedInsights.has(contact.id) ? 'Show less' : 'Show more insights'"
+                          class="q-mt-xs"
+                          :loading="insightExpandLoading === contact.id"
+                          @click="toggleInsightExpand(contact.id)"
+                        />
+                      </template>
+                    </div>
+
                     <!-- Audio + transcript download -->
                     <div v-if="contact.audio_url">
                       <div class="row items-center justify-between q-mb-xs">
@@ -739,10 +823,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { INDIA_STATES, INDIA_CITIES_WITH_OTHER, ALL_INDIA_CITIES } from 'src/data/india-locations'
 import { useQuasar } from 'quasar'
+import { api } from 'boot/axios'
 import { useAuthStore } from 'src/stores/auth'
 import { usePartnersStore } from 'src/stores/partners'
 import { useTasksStore } from 'src/stores/tasks'
@@ -770,6 +855,8 @@ const tasksStore = useTasksStore()
 const partner = ref(null)
 const contacts = ref([])
 const contactsLoading = ref(false)
+const partnerCallInsights = ref([])
+const insightDetailById = ref({})
 const showContactDialog = ref(false)
 const showEditDialog = ref(false)
 const editNotes = ref(false)
@@ -1004,19 +1091,70 @@ const loadPartner = async () => {
 // Polling for transcription status — defined before loadContacts so it can be called there
 let pollTimer = null
 
+const insightByContactId = computed(() => {
+  const m = {}
+  for (const row of partnerCallInsights.value) {
+    if (row && row.contact != null) m[row.contact] = row
+  }
+  return m
+})
+
+const hasPendingInsights = () =>
+  authStore.isAdmin && partnerCallInsights.value.some(ci =>
+    ci.status === 'pending' || ci.status === 'processing',
+  )
+
 const hasPendingTranscription = () =>
   contacts.value.some(c =>
     c.transcription_status === 'pending' || c.transcription_status === 'processing' ||
-    c.summary_status === 'pending' || c.summary_status === 'processing'
-  )
+    c.summary_status === 'pending' || c.summary_status === 'processing',
+  ) || hasPendingInsights()
 
 const pollIfNeeded = () => {
   clearTimeout(pollTimer)
   if (hasPendingTranscription()) {
     pollTimer = setTimeout(async () => {
       contacts.value = await store.fetchContacts(route.params.id)
+      if (authStore.isAdmin) await loadPartnerInsights()
       pollIfNeeded()
     }, 4000)
+  }
+}
+
+async function loadPartnerInsights() {
+  if (!authStore.isAdmin || !route.params.id) {
+    partnerCallInsights.value = []
+    return
+  }
+  try {
+    const rows = await store.fetchPartnerCallInsights(route.params.id)
+    partnerCallInsights.value = rows
+    const rowById = {}
+    for (const r of rows) rowById[String(r.id)] = r
+    const validIds = new Set(rows.map(r => r.id))
+    const nextDetails = {}
+    for (const [id, val] of Object.entries(insightDetailById.value || {})) {
+      if (!validIds.has(Number(id))) continue
+      // Invalidate ONLY when the actual insight content changed.
+      // Polling (telegram retries, last_attempt_at, etc.) keeps bumping `updated_at`,
+      // so we must use a content-derived fingerprint instead, otherwise the
+      // expanded "Show more" panel collapses on every poll tick.
+      const row = rowById[id]
+      const cachedFp = val?.transcript_fingerprint || ''
+      const rowFp = row?.transcript_fingerprint || ''
+      const cachedCount = Number(val?.insight_count ?? -1)
+      const rowCount = Number(row?.insight_count ?? -2)
+      const cachedStatus = val?.status || ''
+      const rowStatus = row?.status || ''
+      if (cachedFp && rowFp && cachedFp !== rowFp) continue
+      if (cachedCount !== rowCount) continue
+      if (cachedStatus && rowStatus && cachedStatus !== rowStatus) continue
+      nextDetails[id] = val
+    }
+    insightDetailById.value = nextDetails
+  } catch {
+    partnerCallInsights.value = []
+    insightDetailById.value = {}
   }
 }
 
@@ -1024,6 +1162,7 @@ const loadContacts = async () => {
   contactsLoading.value = true
   try { contacts.value = await store.fetchContacts(route.params.id) }
   finally { contactsLoading.value = false }
+  await loadPartnerInsights()
   pollIfNeeded()
 }
 
@@ -1162,6 +1301,8 @@ function renderMd(text) {
 
 const expandedContacts  = ref(new Set())
 const expandedSummaries = ref(new Set())
+const expandedInsights  = ref(new Set())
+const insightExpandLoading = ref(null)
 
 const toggleExpand = (id) => {
   const s = new Set(expandedContacts.value)
@@ -1174,7 +1315,73 @@ const toggleSummary = (id) => {
   expandedSummaries.value = s
 }
 
+function insightMarkdownForContact(contactId) {
+  const row = insightByContactId.value[contactId]
+  if (!row) return ''
+  const full = insightDetailById.value[row.id]
+  const md = (full && full.insights_markdown) || row.preview || ''
+  return md
+}
+
+function insightItemsForContact(contactId) {
+  const row = insightByContactId.value[contactId]
+  if (!row?.id) return []
+  const full = insightDetailById.value[row.id]
+  const items = full?.insights_json?.insights
+  return Array.isArray(items) ? items : []
+}
+
+function formatInsightCategory(category) {
+  const labels = {
+    product: 'Product / Offer',
+    market_ayurveda: 'Ayurveda Market',
+    competitors: 'Competitors / Alternatives',
+    manufacturers: 'Manufacturers / Brands',
+    platform_ask_ayurveda: 'Ask Ayurveda Platform',
+    prescribing_procurement: 'Prescribing / Procurement',
+    physician_practice: 'Prescribing / Procurement',
+    earning_money: 'Earnings / Margins',
+    other: 'Other',
+  }
+  return labels[String(category || '').toLowerCase()] || 'Other'
+}
+
+function formatInsightSentiment(sentiment) {
+  const labels = {
+    positive: 'Positive',
+    negative: 'Negative',
+    neutral: 'Neutral',
+    mixed: 'Mixed',
+  }
+  return labels[String(sentiment || '').toLowerCase()] || 'Neutral'
+}
+
+async function toggleInsightExpand(contactId) {
+  const s = new Set(expandedInsights.value)
+  if (s.has(contactId)) {
+    s.delete(contactId)
+    expandedInsights.value = s
+    return
+  }
+  const row = insightByContactId.value[contactId]
+  if (row?.id && !insightDetailById.value[row.id]) {
+    insightExpandLoading.value = contactId
+    try {
+      const res = await api.get(`/call-insights/${row.id}/`)
+      insightDetailById.value = { ...insightDetailById.value, [row.id]: res.data }
+    } catch {
+      $q.notify({ type: 'negative', message: 'Could not load full insight text' })
+      return
+    } finally {
+      insightExpandLoading.value = null
+    }
+  }
+  s.add(contactId)
+  expandedInsights.value = s
+}
+
 const retryingContact = ref(null)
+const retryingInsightContactId = ref(null)
 const showTranscriptDialog = ref(false)
 const transcriptViewerContact = ref(null)
 
@@ -1203,6 +1410,21 @@ const retrySummary = async (contact) => {
     $q.notify({ type: 'negative', message: 'Failed to retry summary' })
   } finally {
     retryingContact.value = null
+  }
+}
+
+const retryCallInsights = async (contact) => {
+  retryingInsightContactId.value = contact.id
+  try {
+    await store.retryCallInsights(contact.id)
+    $q.notify({ type: 'positive', message: 'Insight extraction queued', timeout: 1500 })
+    await loadPartnerInsights()
+    pollIfNeeded()
+  } catch (e) {
+    const msg = e?.response?.data?.error || 'Failed to retry insights'
+    $q.notify({ type: 'negative', message: msg })
+  } finally {
+    retryingInsightContactId.value = null
   }
 }
 
@@ -1263,6 +1485,11 @@ const onPartnerUpdated = async () => {
   await loadPartner()
   $q.notify({ type: 'positive', message: 'Partner updated' })
 }
+
+watch(
+  () => authStore.isAdmin,
+  (is) => { if (is) loadPartnerInsights() },
+)
 
 onMounted(() => { loadPartner(); loadContacts(); loadTasks() })
 onUnmounted(() => { clearTimeout(pollTimer) })

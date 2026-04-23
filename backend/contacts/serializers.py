@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from accounts.serializers import UserSerializer
-from .models import Contact
+from .models import Contact, CallInsight, InsightAggregate
 
 
 class ContactSerializer(serializers.ModelSerializer):
@@ -56,4 +56,97 @@ class ContactSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class CallInsightListSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source='partner.name', read_only=True)
+    created_by_detail = UserSerializer(source='created_by', read_only=True)
+    preview = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CallInsight
+        fields = [
+            'id', 'contact', 'partner', 'partner_name', 'call_date',
+            'created_by', 'created_by_detail',
+            'status', 'insight_count', 'density_bucket',
+            'preview', 'telegram_status', 'telegram_last_error',
+            'transcript_fingerprint',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_preview(self, obj):
+        md = (obj.insights_markdown or '').strip()
+        if not md:
+            return ''
+        line = md.replace('\n', ' ').strip()
+        return line[:220] + ('…' if len(line) > 220 else '')
+
+
+class CallInsightDetailSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source='partner.name', read_only=True)
+    created_by_detail = UserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = CallInsight
+        fields = [
+            'id', 'contact', 'partner', 'partner_name', 'call_date',
+            'created_by', 'created_by_detail',
+            'status', 'insight_count', 'density_bucket',
+            'insights_json', 'insights_markdown',
+            'transcript_fingerprint',
+            'retries', 'last_error', 'last_attempt_at',
+            'telegram_status', 'telegram_retries', 'telegram_last_error',
+            'telegram_last_attempt_at', 'telegram_message_ids',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+
+class InsightAggregateListSerializer(serializers.ModelSerializer):
+    created_by_detail = UserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = InsightAggregate
+        fields = [
+            'id', 'kind', 'date_from', 'date_to', 'status',
+            'total_calls', 'total_insights', 'unique_partners',
+            'summary_text', 'last_error',
+            'created_by', 'created_by_detail',
+            'created_at', 'updated_at', 'completed_at',
+        ]
+        read_only_fields = fields
+
+
+class InsightAggregateDetailSerializer(serializers.ModelSerializer):
+    created_by_detail = UserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = InsightAggregate
+        fields = [
+            'id', 'kind', 'date_from', 'date_to', 'status',
+            'total_calls', 'total_insights', 'unique_partners',
+            'summary_text', 'clusters_json', 'rendered_markdown',
+            'last_error', 'retries', 'last_attempt_at', 'completed_at',
+            'created_by', 'created_by_detail',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+
+class InsightAggregateCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InsightAggregate
+        fields = ['date_from', 'date_to']
+
+    def validate(self, attrs):
+        if attrs['date_from'] > attrs['date_to']:
+            raise serializers.ValidationError('date_from must be on or before date_to')
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            validated_data['created_by'] = request.user
         return super().create(validated_data)

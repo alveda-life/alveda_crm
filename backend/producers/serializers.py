@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from accounts.serializers import UserSerializer
-from .models import Producer, ProducerTask, ProducerComment
+from .models import Producer, ProducerTask, ProducerComment, ProducerWeeklyReport
 
 
 class ProducerCommentSerializer(serializers.ModelSerializer):
@@ -119,3 +119,34 @@ class ProducerWriteSerializer(serializers.ModelSerializer):
             'certifications', 'communication_status', 'next_step', 'contact_info',
             'control_date', 'last_contact', 'planned_connection_date',
         ]
+
+
+class ProducerWeeklyReportListSerializer(serializers.ModelSerializer):
+    created_by_detail = UserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = ProducerWeeklyReport
+        fields = [
+            'id', 'period_from', 'period_to', 'status', 'triggered_by',
+            'total_new_producers', 'total_changed_producers', 'total_comments_considered',
+            'summary_text', 'last_error',
+            'created_by', 'created_by_detail',
+            'created_at', 'updated_at', 'completed_at',
+        ]
+        read_only_fields = fields
+
+
+class ProducerWeeklyReportDetailSerializer(serializers.ModelSerializer):
+    created_by_detail = UserSerializer(source='created_by', read_only=True)
+
+    class Meta:
+        model = ProducerWeeklyReport
+        fields = [
+            'id', 'period_from', 'period_to', 'status', 'triggered_by',
+            'total_new_producers', 'total_changed_producers', 'total_comments_considered',
+            'summary_text', 'new_producers_json', 'changes_json', 'rendered_markdown',
+            'last_error', 'retries', 'last_attempt_at', 'completed_at',
+            'created_by', 'created_by_detail',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields

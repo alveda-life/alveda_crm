@@ -2,11 +2,13 @@ import os
 import json
 import re
 import time
+import threading
 import shutil
 import tempfile
 import subprocess
 import logging
 from django.core.files.base import ContentFile
+from django.db import close_old_connections
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ def _env_int(name: str, default: int, min_value: int = 1) -> int:
 TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe'
 CHUNK_SECONDS    = _env_int('TRANSCRIBE_CHUNK_SECONDS', 7 * 60)  # default: 7 min
 CHUNK_OVERLAP_SECONDS = _env_int('TRANSCRIBE_CHUNK_OVERLAP_SECONDS', 4, min_value=0)
+MIN_CHUNK_SECONDS = _env_int('TRANSCRIBE_MIN_CHUNK_SECONDS', 2 * 60, min_value=30)
 
 
 def _audio_duration_seconds(file_path: str) -> int:
@@ -203,6 +206,11 @@ def _transcribe_file(client, file_path: str) -> str:
     return _transcribe_one(client, os.path.basename(file_path), audio_bytes)
 
 
+def _is_input_too_large_error(error: Exception) -> bool:
+    msg = str(error).lower()
+    return ('input_too_large' in msg) or ('too large for this model' in msg)
+
+
 def _concat_with_overlap_dedupe(current_text: str, new_text: str, max_scan_chars: int = 2500) -> str:
     """
     Concatenate chunk texts while removing duplicated boundary caused by overlap.
@@ -275,6 +283,57 @@ def _transcribe_chunked(
             merged_diar = _concat_with_overlap_dedupe(merged_diar, diar)
 
         return merged_raw, merged_diar
+
+
+def _adaptive_chunk_plan(initial_chunk_seconds: int) -> list:
+    """
+    Build a descending chunk-size fallback plan for long calls.
+    Example with default settings: [420, 300, 240, 180, 120].
+    """
+    candidates = [
+        int(initial_chunk_seconds),
+        5 * 60,
+        4 * 60,
+        3 * 60,
+        2 * 60,
+    ]
+    plan = []
+    for sec in candidates:
+        if sec < MIN_CHUNK_SECONDS:
+            sec = MIN_CHUNK_SECONDS
+        if sec not in plan:
+            plan.append(sec)
+    return sorted(plan, reverse=True)
+
+
+def _transcribe_chunked_adaptive(client, file_path: str):
+    """
+    Try chunked transcription with progressively smaller chunk sizes when the
+    API reports input_too_large for a chunk.
+    """
+    last_err = None
+    for chunk_seconds in _adaptive_chunk_plan(CHUNK_SECONDS):
+        overlap = min(CHUNK_OVERLAP_SECONDS, max(0, chunk_seconds // 10))
+        try:
+            logger.warning(
+                'Adaptive chunk attempt: chunk=%ss overlap=%ss',
+                chunk_seconds, overlap,
+            )
+            return _transcribe_chunked(
+                client, file_path, chunk_seconds=chunk_seconds, overlap_seconds=overlap
+            )
+        except Exception as e:
+            last_err = e
+            if _is_input_too_large_error(e) and chunk_seconds > MIN_CHUNK_SECONDS:
+                logger.warning(
+                    'Chunk size %ss still too large; retrying with smaller chunks',
+                    chunk_seconds,
+                )
+                continue
+            raise
+    if last_err:
+        raise last_err
+    raise RuntimeError('Adaptive chunking failed without explicit error')
 
 
 DIARIZE_PROMPT = """You are processing a transcription of a sales phone call between an AskAyurveda operator \
@@ -456,22 +515,17 @@ def transcribe_audio(contact):
                         'contact %s: duration %ss > %ss — chunking (%ss overlap)',
                         contact.id, duration_secs, CHUNK_SECONDS, CHUNK_OVERLAP_SECONDS,
                     )
-                    source_text, diarized = _transcribe_chunked(
-                        client, local_path, CHUNK_SECONDS, CHUNK_OVERLAP_SECONDS
-                    )
+                    source_text, diarized = _transcribe_chunked_adaptive(client, local_path)
                 else:
                     try:
                         source_text = _transcribe_file(client, local_path)
                     except Exception as e:
-                        msg = str(e).lower()
-                        if 'input_too_large' in msg or 'too large for this model' in msg:
+                        if _is_input_too_large_error(e):
                             logger.warning(
                                 'contact %s: single-shot rejected as input_too_large — falling back to chunking',
                                 contact.id,
                             )
-                            source_text, diarized = _transcribe_chunked(
-                                client, local_path, CHUNK_SECONDS, CHUNK_OVERLAP_SECONDS
-                            )
+                            source_text, diarized = _transcribe_chunked_adaptive(client, local_path)
                         else:
                             raise
                     else:
@@ -510,8 +564,32 @@ def transcribe_audio(contact):
 
                 logger.warning(f'Transcription + diarization done for contact {contact.id} ({duration_secs}s)')
 
-                from .summarization import summarize_transcription
-                summarize_transcription(contact)
+                def _post_transcribe_summarize(cid):
+                    close_old_connections()
+                    try:
+                        from .models import Contact
+                        from .summarization import summarize_transcription
+                        c = Contact.objects.get(pk=cid)
+                        summarize_transcription(c)
+                    except Exception:
+                        pass
+                    finally:
+                        close_old_connections()
+
+                def _post_transcribe_insights(cid):
+                    close_old_connections()
+                    try:
+                        from .insights import extract_call_insights_background
+                        extract_call_insights_background(cid)
+                    finally:
+                        close_old_connections()
+
+                threading.Thread(
+                    target=_post_transcribe_summarize, args=(contact.id,), daemon=True,
+                ).start()
+                threading.Thread(
+                    target=_post_transcribe_insights, args=(contact.id,), daemon=True,
+                ).start()
                 return
 
             except Exception as e:

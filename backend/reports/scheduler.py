@@ -77,9 +77,11 @@ def start():
         # ---- Brand Situation ----
         scheduler.add_job(
             _run_brand_situation,
-            CronTrigger(day_of_week='fri', hour=15, minute=0, timezone=IST_TZ),
+            CronTrigger(day_of_week='mon-fri', hour=15, minute=0, timezone=IST_TZ),
             id='brand_situation_weekly',
             replace_existing=True,
+            max_instances=1,
+            coalesce=True,
         )
         scheduler.add_job(
             _retry_brand_situation,
@@ -128,7 +130,7 @@ def start():
             from .sync_runners import run_crm_partners_sync
             scheduler.add_job(
                 run_crm_partners_sync,
-                CronTrigger(minute=5, timezone=IST_TZ),
+                CronTrigger(minute='5,25,45', timezone=IST_TZ),
                 id='crm_partners_sync',
                 replace_existing=True,
                 max_instances=1,
@@ -136,6 +138,34 @@ def start():
             )
         except Exception as e:
             logger.error('Failed to register data-sync schedule: %s', e)
+
+        # ---- Producer Weekly Report (Fri 16:00 IST) ----
+        try:
+            from .sync_runners import run_producer_weekly_report
+            scheduler.add_job(
+                run_producer_weekly_report,
+                CronTrigger(day_of_week='fri', hour=16, minute=0, timezone=IST_TZ),
+                id='producer_onboarding_weekly_report',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            logger.error('Failed to register producer-onboarding-weekly-report schedule: %s', e)
+
+        # ---- General Insights rolling refresh (Mon-Fri 17:00 IST) ----
+        try:
+            from .sync_runners import run_general_insights_refresh
+            scheduler.add_job(
+                run_general_insights_refresh,
+                CronTrigger(day_of_week='mon-fri', hour=17, minute=0, timezone=IST_TZ),
+                id='general_insights_refresh',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            logger.error('Failed to register general-insights refresh: %s', e)
 
         scheduler.start()
         logger.info(

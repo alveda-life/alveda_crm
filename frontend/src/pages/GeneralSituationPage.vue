@@ -7,7 +7,7 @@
       <div>
         <div class="gs-title">General Situation</div>
         <div class="gs-subtitle">
-          Weekly snapshot of every active brand • auto-generated every Friday 15:00 IST
+          Weekly snapshot of every active brand • auto-refreshed Mon–Fri at 15:00 IST
         </div>
       </div>
 
@@ -114,6 +114,21 @@
               </div>
               <span class="gs-readiness-num">{{ brand.readiness_percent }}%</span>
             </div>
+            <q-chip
+              v-if="brand.weeks_in_funnel != null"
+              dense
+              :color="weeksInFunnelColor(brand.weeks_in_funnel)"
+              text-color="white"
+              class="gs-brand-stage"
+              icon="hourglass_bottom"
+            >
+              {{ brand.weeks_in_funnel }} {{ brand.weeks_in_funnel === 1 ? 'week' : 'weeks' }} in funnel
+              <q-tooltip>
+                Time we have been onboarding this brand —
+                started {{ brand.funnel_started_at ? formatWeek(brand.funnel_started_at) : '?' }}.
+                Counts every calendar week from the earlier of (producer created, first comment) up to now.
+              </q-tooltip>
+            </q-chip>
             <q-chip
               dense
               :color="stageColor(brand.stage_key)"
@@ -287,6 +302,20 @@ function stageColor (stage) {
   if (stage === 'terms_negotiation') return 'deep-orange-6'
   if (stage === 'in_communication')  return 'blue-grey-6'
   return 'grey-7'
+}
+
+function weeksInFunnelColor (weeks) {
+  // Visual signal of how long we've been onboarding a brand.
+  // <=4 weeks (≤1 month): green — fresh
+  // 5-12 weeks (~1-3 months): teal — active
+  // 13-26 weeks (~3-6 months): amber — getting long
+  // 27-52 weeks (~6-12 months): orange — too long
+  // >52 weeks (>1 year): red — stuck / needs decision
+  if (weeks <= 4)  return 'green-6'
+  if (weeks <= 12) return 'teal-6'
+  if (weeks <= 26) return 'amber-8'
+  if (weeks <= 52) return 'orange-8'
+  return 'red-7'
 }
 
 async function fetchReports () {
