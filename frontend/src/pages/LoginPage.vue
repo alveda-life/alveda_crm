@@ -88,6 +88,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from 'src/stores/auth'
+import { getLandingPath } from 'src/utils/landing'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -102,7 +103,7 @@ const handleLogin = async () => {
   loading.value = true
   try {
     await authStore.login(form.value.username, form.value.password)
-    router.push('/kanban')
+    router.push(getLandingPath(authStore))
   } catch (e) {
     const detail = e.response?.data?.detail
     error.value = detail || 'Invalid username or password'
