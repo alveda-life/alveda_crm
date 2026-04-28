@@ -86,7 +86,7 @@ def run_producer_weekly_report():
 def run_general_insights_refresh():
     """
     Refresh the rolling General Insights buckets so the Partners → General
-    Insights page always has fresh top-15 themes ready to display.
+    Insights page always has fresh top-30 themes ready to display.
 
     The actual generation runs in background daemon threads spawned by
     `find_or_create_rolling`; this job just enqueues all four kinds.

@@ -7,7 +7,7 @@
           General Insights
         </div>
         <div class="text-caption text-grey-7">
-          Top 15 cross-call themes ranked by how many unique partners voiced them.
+          Top 30 cross-call themes ranked by how many unique partners voiced them.
           Same idea phrased differently is merged into one theme.
         </div>
       </div>

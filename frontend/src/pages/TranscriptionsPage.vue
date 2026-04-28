@@ -9,7 +9,7 @@
         placeholder="Search partner or operator…"
         style="min-width:240px"
         debounce="350"
-        @update:model-value="load"
+        @update:model-value="resetPageAndLoad"
       >
         <template #prepend><q-icon name="search" /></template>
       </q-input>
@@ -21,7 +21,23 @@
         outlined dense clearable
         placeholder="All statuses"
         style="min-width:160px"
-        @update:model-value="load"
+        @update:model-value="resetPageAndLoad"
+      />
+
+      <q-input
+        v-model="dateFrom"
+        outlined dense type="date"
+        label="From"
+        style="min-width:150px"
+        @update:model-value="resetPageAndLoad"
+      />
+
+      <q-input
+        v-model="dateTo"
+        outlined dense type="date"
+        label="To"
+        style="min-width:150px"
+        @update:model-value="resetPageAndLoad"
       />
 
       <q-btn
@@ -31,10 +47,18 @@
         label="Assigned to Me"
         dense unelevated no-caps
         style="border-radius:8px;font-size:13px;"
-        @click="onlyMine = !onlyMine; load()"
+        @click="onlyMine = !onlyMine; resetPageAndLoad()"
       />
 
       <q-space />
+
+      <q-btn
+        outline dense no-caps color="primary"
+        icon="download"
+        label="Export CSV"
+        :loading="exporting"
+        @click="exportCsv"
+      />
 
       <div class="text-caption text-grey-6">{{ total }} transcriptions</div>
     </div>
@@ -372,6 +396,9 @@ const total   = ref(0)
 const search  = ref('')
 const filterStatus = ref(null)
 const onlyMine     = ref(false)
+const dateFrom     = ref('')
+const dateTo       = ref('')
+const exporting    = ref(false)
 const detailOpen      = ref(false)
 const selected        = ref(null)
 const rightTab        = ref('summary')
@@ -532,27 +559,53 @@ function renderMd(text) {
     .join('\n')
 }
 
+function validateDateRange() {
+  if (dateFrom.value && dateTo.value && dateFrom.value > dateTo.value) {
+    $q.notify({ type: 'negative', message: '“From” must be on or before “To”' })
+    return false
+  }
+  return true
+}
+
+function buildListParams(includePagination = true) {
+  if (!validateDateRange()) return null
+
+  const params = { has_audio: 'true' }
+  if (includePagination) {
+    params.page = pagination.value.page
+    params.page_size = pagination.value.rowsPerPage
+  }
+  if (search.value)       params.search = search.value
+  if (filterStatus.value) params.transcription_status = filterStatus.value
+  if (onlyMine.value)     params.created_by = authStore.user?.id
+  if (dateFrom.value)     params.date_after = dateFrom.value
+  if (dateTo.value)       params.date_before = dateTo.value
+  if (pagination.value.sortBy) {
+    params.ordering = (pagination.value.descending ? '-' : '') + pagination.value.sortBy
+  }
+  return params
+}
+
 async function load() {
+  const params = buildListParams(true)
+  if (!params) return
+
   loading.value = true
   try {
-    const params = {
-      has_audio: 'true',
-      page:      pagination.value.page,
-      page_size: pagination.value.rowsPerPage,
-    }
-    if (search.value)       params.search = search.value
-    if (filterStatus.value) params.transcription_status = filterStatus.value
-    if (onlyMine.value)     params.created_by = authStore.user?.id
-    if (pagination.value.sortBy) {
-      params.ordering = (pagination.value.descending ? '-' : '') + pagination.value.sortBy
-    }
     const res = await api.get('/contacts/', { params })
     rows.value  = res.data.results || res.data
     total.value = res.data.count   || rows.value.length
     pagination.value.rowsNumber = total.value
+  } catch (e) {
+    $q.notify({ type: 'negative', message: e.response?.data?.detail || 'Failed to load transcriptions' })
   } finally {
     loading.value = false
   }
+}
+
+function resetPageAndLoad() {
+  pagination.value.page = 1
+  load()
 }
 
 function onRequest(props) {
@@ -590,6 +643,84 @@ function statusTextColor(st) {
 }
 function statusLabel(st) {
   return { done: 'Done', processing: 'Processing', pending: 'Pending', failed: 'Failed', '': 'No audio' }[st] || st
+}
+
+function csvEscape(value) {
+  const text = value == null ? '' : String(value)
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function downloadCsv(filename, headers, dataRows) {
+  const csv = [
+    headers.map(csvEscape).join(','),
+    ...dataRows.map(row => row.map(csvEscape).join(',')),
+  ].join('\r\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function exportPeriodSlug() {
+  if (!dateFrom.value && !dateTo.value) return 'all-time'
+  return `${dateFrom.value || 'start'}-to-${dateTo.value || 'today'}`
+}
+
+async function fetchAllTranscriptions() {
+  const baseParams = buildListParams(false)
+  if (!baseParams) return null
+
+  const allRows = []
+  let page = 1
+  const pageSize = 500
+  while (true) {
+    const res = await api.get('/contacts/', {
+      params: { ...baseParams, page, page_size: pageSize },
+    })
+    const pageRows = res.data.results || res.data
+    allRows.push(...pageRows)
+    if (!res.data.results || !res.data.next || allRows.length >= (res.data.count || 0)) break
+    page += 1
+  }
+  return allRows
+}
+
+async function exportCsv() {
+  exporting.value = true
+  try {
+    const exportRows = await fetchAllTranscriptions()
+    if (!exportRows) return
+    downloadCsv(
+      `transcriptions-${exportPeriodSlug()}.csv`,
+      [
+        'Date', 'Partner', 'Operator', 'Duration', 'Status',
+        'Survey score', 'Explanation score', 'Overall score',
+        'Summary', 'Diarized transcript', 'Raw transcript',
+      ],
+      exportRows.map(row => [
+        fmtDatetime(row.date),
+        row.partner_name,
+        row.created_by_detail?.full_name || row.created_by_detail?.username || '',
+        fmtDuration(row.call_duration),
+        statusLabel(row.transcription_status),
+        row.quality_survey,
+        row.quality_explanation,
+        row.quality_overall,
+        row.summary,
+        row.diarized_transcript,
+        row.transcription,
+      ]),
+    )
+  } catch (e) {
+    $q.notify({ type: 'negative', message: e.response?.data?.detail || 'CSV export failed' })
+  } finally {
+    exporting.value = false
+  }
 }
 
 onMounted(load)

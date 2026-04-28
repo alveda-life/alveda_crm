@@ -80,7 +80,7 @@ CLUSTERING RULES (strict — read TWICE before writing output):
 - Different clusters ONLY if the action implication is genuinely different:
    * Catalog breadth ≠ Commission structure ≠ Platform UX ≠ Logistics/delivery ≠ Patient acquisition.
 - Drop records that are pure biography, acknowledgement, or filler. Do NOT make a cluster from a single fluff record.
-- TARGET 8–15 strong, well-merged clusters. Hard cap at 15. If you have <8 truly distinct themes, return fewer rather than padding.
+- TARGET 20–30 strong, well-merged clusters. Hard cap at 30. If you have <20 truly distinct themes, return fewer rather than padding.
 - A cluster may have a single record if the point is genuinely material (sharp competitor pricing, named competitor mention, explicit feature request, etc.).
 - Before finalising: re-read every cluster theme and ask "could this be merged with another?". If yes, merge.
 
@@ -708,8 +708,8 @@ def build_aggregate(aggregate_id: int, force: bool = False) -> None:
                     clusters = _llm_merge_pass(clusters, records, client, model_used)
 
                 clusters = sorted(clusters, key=lambda c: (-c['partner_count'], -c['mention_count']))
-                if len(clusters) > 15:
-                    clusters = clusters[:15]
+                if len(clusters) > 30:
+                    clusters = clusters[:30]
 
                 clusters_clean = _strip_internal_fields(clusters)
                 payload = {

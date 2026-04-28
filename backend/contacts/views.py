@@ -161,7 +161,7 @@ class InsightAggregateViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get', 'post'], url_path='general')
     def general(self, request):
         """
-        General Insights — always-on rolling top-15 view.
+        General Insights — always-on rolling top-30 view.
 
         GET  ?period=30d|60d|180d|all   → returns the cached InsightAggregate
                                           row for that bucket. Builds it in
@@ -266,12 +266,26 @@ class ContactViewSet(viewsets.ModelViewSet):
         created_by = self.request.query_params.get('created_by')
         if created_by:
             qs = qs.filter(created_by_id=created_by)
+        transcription_status = self.request.query_params.get('transcription_status')
+        if transcription_status in ('', 'pending', 'processing', 'done', 'failed'):
+            qs = qs.filter(transcription_status=transcription_status)
         date_after = self.request.query_params.get('date_after')
         if date_after:
             qs = qs.filter(date__date__gte=date_after)
         date_before = self.request.query_params.get('date_before')
         if date_before:
             qs = qs.filter(date__date__lte=date_before)
+        search = (self.request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(partner__name__icontains=search)
+                | Q(created_by__first_name__icontains=search)
+                | Q(created_by__last_name__icontains=search)
+                | Q(created_by__username__icontains=search)
+                | Q(created_by__email__icontains=search)
+                | Q(transcription__icontains=search)
+                | Q(diarized_transcript__icontains=search)
+            )
         ordering = self.request.query_params.get('ordering')
         if ordering in ('-date', 'date', '-quality_overall', 'quality_overall'):
             qs = qs.order_by(ordering)

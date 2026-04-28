@@ -21,7 +21,7 @@
             placeholder="Search partner or insight text…"
             style="min-width:240px"
             debounce="350"
-            @update:model-value="load"
+            @update:model-value="resetPageAndLoad"
           >
             <template #prepend><q-icon name="search" /></template>
           </q-input>
@@ -33,7 +33,7 @@
             outlined dense clearable
             placeholder="Status"
             style="min-width:140px"
-            @update:model-value="load"
+            @update:model-value="resetPageAndLoad"
           />
 
           <q-select
@@ -43,10 +43,33 @@
             outlined dense clearable
             placeholder="Volume"
             style="min-width:130px"
-            @update:model-value="load"
+            @update:model-value="resetPageAndLoad"
+          />
+
+          <q-input
+            v-model="dateFrom"
+            outlined dense type="date"
+            label="From"
+            style="min-width:150px"
+            @update:model-value="resetPageAndLoad"
+          />
+
+          <q-input
+            v-model="dateTo"
+            outlined dense type="date"
+            label="To"
+            style="min-width:150px"
+            @update:model-value="resetPageAndLoad"
           />
 
           <q-space />
+          <q-btn
+            outline dense no-caps color="primary"
+            icon="download"
+            label="Export CSV"
+            :loading="exporting"
+            @click="exportCsv"
+          />
           <div class="text-caption text-grey-6">{{ total }} insights</div>
         </div>
 
@@ -424,6 +447,9 @@ const pagination = ref({
 const search = ref('')
 const filterStatus = ref(null)
 const filterBucket = ref(null)
+const dateFrom = ref('')
+const dateTo = ref('')
+const exporting = ref(false)
 const statusOptions = [
   { label: 'Done', value: 'done' },
   { label: 'Pending', value: 'pending' },
@@ -483,21 +509,41 @@ function renderMd(text) {
     .join('\n')
 }
 
+function validateDateRange() {
+  if (dateFrom.value && dateTo.value && dateFrom.value > dateTo.value) {
+    $q.notify({ type: 'negative', message: '“From” must be on or before “To”' })
+    return false
+  }
+  return true
+}
+
+function buildListParams(includePagination = true) {
+  if (!validateDateRange()) return null
+
+  const params = {}
+  if (includePagination) {
+    params.page = pagination.value.page
+    params.page_size = pagination.value.rowsPerPage
+  }
+  if (search.value) params.search = search.value
+  if (filterStatus.value) params.status = filterStatus.value
+  if (filterBucket.value) params.density_bucket = filterBucket.value
+  if (dateFrom.value) params.date_after = dateFrom.value
+  if (dateTo.value) params.date_before = dateTo.value
+  if (pagination.value.sortBy) {
+    params.ordering = (pagination.value.descending ? '-' : '') + pagination.value.sortBy
+  }
+  const contactId = route.query.contact
+  if (contactId) params.contact = contactId
+  return params
+}
+
 async function load() {
+  const params = buildListParams(true)
+  if (!params) return
+
   loading.value = true
   try {
-    const params = {
-      page: pagination.value.page,
-      page_size: pagination.value.rowsPerPage,
-    }
-    if (search.value) params.search = search.value
-    if (filterStatus.value) params.status = filterStatus.value
-    if (filterBucket.value) params.density_bucket = filterBucket.value
-    if (pagination.value.sortBy) {
-      params.ordering = (pagination.value.descending ? '-' : '') + pagination.value.sortBy
-    }
-    const contactId = route.query.contact
-    if (contactId) params.contact = contactId
     const res = await api.get('/call-insights/', { params })
     rows.value = res.data.results || res.data
     total.value = res.data.count ?? rows.value.length
@@ -507,6 +553,11 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function resetPageAndLoad() {
+  pagination.value.page = 1
+  load()
 }
 
 function onRequest(props) {
@@ -521,6 +572,96 @@ async function openDetail(_, row) {
     detailOpen.value = true
   } catch {
     $q.notify({ type: 'negative', message: 'Failed to load insight detail' })
+  }
+}
+
+function csvEscape(value) {
+  const text = value == null ? '' : String(value)
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function downloadCsv(filename, headers, dataRows) {
+  const csv = [
+    headers.map(csvEscape).join(','),
+    ...dataRows.map(row => row.map(csvEscape).join(',')),
+  ].join('\r\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function exportPeriodSlug() {
+  if (!dateFrom.value && !dateTo.value) return 'all-time'
+  return `${dateFrom.value || 'start'}-to-${dateTo.value || 'today'}`
+}
+
+async function fetchAllInsights() {
+  const baseParams = buildListParams(false)
+  if (!baseParams) return null
+
+  const allRows = []
+  let page = 1
+  const pageSize = 500
+  while (true) {
+    const res = await api.get('/call-insights/', {
+      params: { ...baseParams, page, page_size: pageSize },
+    })
+    const pageRows = res.data.results || res.data
+    allRows.push(...pageRows)
+    if (!res.data.results || !res.data.next || allRows.length >= (res.data.count || 0)) break
+    page += 1
+  }
+  return allRows
+}
+
+async function hydrateInsightDetails(listRows) {
+  const detailed = []
+  const batchSize = 10
+  for (let i = 0; i < listRows.length; i += batchSize) {
+    const batch = listRows.slice(i, i + batchSize)
+    const results = await Promise.all(
+      batch.map(async row => {
+        const res = await api.get(`/call-insights/${row.id}/`)
+        return { ...row, ...res.data }
+      }),
+    )
+    detailed.push(...results)
+  }
+  return detailed
+}
+
+async function exportCsv() {
+  exporting.value = true
+  try {
+    const listRows = await fetchAllInsights()
+    if (!listRows) return
+    const exportRows = await hydrateInsightDetails(listRows)
+    downloadCsv(
+      `call-insights-${exportPeriodSlug()}.csv`,
+      [
+        'Call date', 'Partner', 'Status', 'Insight count',
+        'Volume', 'Preview', 'Insights markdown',
+      ],
+      exportRows.map(row => [
+        fmtDatetime(row.call_date),
+        row.partner_name,
+        row.status,
+        row.insight_count,
+        row.density_bucket,
+        row.preview,
+        row.insights_markdown,
+      ]),
+    )
+  } catch (e) {
+    $q.notify({ type: 'negative', message: e.response?.data?.detail || 'CSV export failed' })
+  } finally {
+    exporting.value = false
   }
 }
 
