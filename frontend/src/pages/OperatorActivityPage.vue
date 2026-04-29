@@ -60,6 +60,11 @@
                 <div class="metric"><strong>{{ op.sessions_count }}</strong><span>sessions</span></div>
                 <div class="metric"><strong>{{ op.longest_gap_minutes }}m</strong><span>longest gap</span></div>
                 <div class="metric"><strong>{{ op.total_events }}</strong><span>events</span></div>
+                <div class="metric"><strong>{{ op.calls_count || 0 }}</strong><span>calls</span></div>
+                <div class="metric"><strong>{{ op.missed_calls_count || 0 }}</strong><span>missed</span></div>
+                <div class="metric"><strong>{{ formatDuration(op.total_call_seconds) }}</strong><span>talk total</span></div>
+                <div class="metric"><strong>{{ formatDuration(op.avg_call_seconds) }}</strong><span>avg talk</span></div>
+                <div class="metric"><strong>{{ op.insights_count || 0 }}</strong><span>AI insights</span></div>
               </div>
             </div>
             <ActivityTimeline
@@ -102,15 +107,29 @@
           <q-spinner-dots color="primary" size="40px" />
         </div>
 
-        <ActivityHeatmap
-          v-else
-          :users="heatmap?.users || []"
-          :cells="heatmap?.cells || []"
-          :bucket-minutes="heatmap?.bucket_minutes || 30"
-          :date-from="heatmap?.date_from"
-          :date-to="heatmap?.date_to"
-          @cell-click="onHeatmapCellClick"
-        />
+        <template v-else>
+          <div v-if="heatmapStats.length" class="stats-strip q-mb-md">
+            <div v-for="op in heatmapStats" :key="op.user_id" class="stats-card">
+              <div class="stats-card__name">{{ op.full_name }}</div>
+              <div class="stats-card__grid">
+                <span><b>{{ op.calls_count || 0 }}</b> calls</span>
+                <span><b>{{ op.missed_calls_count || 0 }}</b> missed</span>
+                <span><b>{{ formatDuration(op.total_call_seconds) }}</b> talk</span>
+                <span><b>{{ formatDuration(op.avg_call_seconds) }}</b> avg</span>
+                <span><b>{{ op.insights_count || 0 }}</b> insights</span>
+              </div>
+            </div>
+          </div>
+
+          <ActivityHeatmap
+            :users="heatmap?.users || []"
+            :cells="heatmap?.cells || []"
+            :bucket-minutes="heatmap?.bucket_minutes || 30"
+            :date-from="heatmap?.date_from"
+            :date-to="heatmap?.date_to"
+            @cell-click="onHeatmapCellClick"
+          />
+        </template>
       </q-tab-panel>
 
       <!-- EVENTS VIEW -->
@@ -151,6 +170,19 @@
         </div>
 
         <template v-else>
+          <div v-if="eventsCallStats" class="stats-strip q-mb-md">
+            <div class="stats-card stats-card--wide">
+              <div class="stats-card__name">Selected operator call stats</div>
+              <div class="stats-card__grid">
+                <span><b>{{ eventsCallStats.calls_count || 0 }}</b> calls</span>
+                <span><b>{{ eventsCallStats.missed_calls_count || 0 }}</b> missed</span>
+                <span><b>{{ formatDuration(eventsCallStats.total_call_seconds) }}</b> talk total</span>
+                <span><b>{{ formatDuration(eventsCallStats.avg_call_seconds) }}</b> avg talk</span>
+                <span><b>{{ eventsCallStats.insights_count || 0 }}</b> AI insights</span>
+              </div>
+            </div>
+          </div>
+
           <ActivityScatter :events="eventList" />
 
           <q-table
@@ -242,6 +274,7 @@ const weekFrom = ref((() => {
 })())
 const weekUserIds = ref([])
 const heatmap = computed(() => activityStore.heatmap)
+const heatmapStats = computed(() => heatmap.value?.users || [])
 
 async function loadHeatmap () {
   await activityStore.fetchHeatmap({
@@ -267,6 +300,7 @@ const eventsDate   = ref(today)
 const eventsType   = ref(null)
 
 const eventList = computed(() => activityStore.events?.results || [])
+const eventsCallStats = computed(() => activityStore.events?.call_stats || null)
 
 const userOptions = ref([])
 function syncUserOptions (users) {
@@ -332,6 +366,15 @@ function formatTime (iso) {
 }
 function formatDateTime (iso) {
   return formatServerDateTime(iso)
+}
+function formatDuration (seconds) {
+  const total = Number(seconds) || 0
+  if (!total) return '0m'
+  const mins = Math.round(total / 60)
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m ? `${h}h ${m}m` : `${h}h`
 }
 
 const anyLoading = computed(() =>
@@ -411,6 +454,38 @@ watch([tab, dayDate], () => {
 }
 .day-row__metrics .metric strong {
   font-size: 14px;
+  color: #212121;
+}
+.stats-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.stats-card {
+  background: #FFFFFF;
+  border: 1px solid #EEEEEE;
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 220px;
+  flex: 1;
+}
+.stats-card--wide {
+  max-width: 720px;
+}
+.stats-card__name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #212121;
+  margin-bottom: 6px;
+}
+.stats-card__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 11px;
+  color: #757575;
+}
+.stats-card__grid b {
   color: #212121;
 }
 </style>

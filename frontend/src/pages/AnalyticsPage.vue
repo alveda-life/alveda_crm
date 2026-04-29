@@ -678,6 +678,75 @@
         />
       </div>
 
+      <!-- ══════════════ OPERATOR DAILY TRENDS ════════════════════════════ -->
+      <div class="acard q-mb-lg">
+        <div class="acard-header q-mb-md">
+          <div>
+            <div class="acard-title">Operator Daily Trends</div>
+            <div class="text-caption text-grey-5">calls · talk time · AI insights — {{ periodLabel }}</div>
+          </div>
+          <q-select
+            v-model="operatorTrendSelected"
+            :options="operatorTrendOptions"
+            label="Operators"
+            dense outlined multiple emit-value map-options use-chips
+            option-value="value"
+            option-label="label"
+            style="min-width:260px"
+          />
+        </div>
+
+        <div class="trend-grid">
+          <div class="trend-chart">
+            <div class="trend-title">Calls by Operator</div>
+            <LineChart
+              :data="operatorTrendChartData('calls_count')"
+              label-key="label"
+              :series="operatorTrendSeries"
+            />
+          </div>
+          <div class="trend-chart">
+            <div class="trend-title">Avg Talk Time (min)</div>
+            <LineChart
+              :data="operatorTrendChartData('avg_call_minutes')"
+              label-key="label"
+              :series="operatorTrendSeries"
+            />
+          </div>
+          <div class="trend-chart">
+            <div class="trend-title">AI Insights</div>
+            <LineChart
+              :data="operatorTrendChartData('insights_count')"
+              label-key="label"
+              :series="operatorTrendSeries"
+            />
+          </div>
+          <div class="trend-chart">
+            <div class="trend-title">Total Talk Minutes</div>
+            <LineChart
+              :data="operatorTrendChartData('total_call_minutes')"
+              label-key="label"
+              :series="operatorTrendSeries"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="acard q-mb-lg">
+        <div class="acard-header q-mb-md">
+          <div class="acard-title">CRM Contact Coverage</div>
+          <div class="text-caption text-grey-5">partners with at least one audio + transcription call vs never contacted</div>
+        </div>
+        <LineChart
+          :data="partnerCoverageData"
+          label-key="label"
+          :series="[
+            { key: 'contacted', label: 'With audio + transcript', color: '#43A047' },
+            { key: 'never', label: 'Never contacted', color: '#EF5350' },
+          ]"
+        />
+      </div>
+
       <!-- ══════════════ OPERATOR SCORECARDS ══════════════════════════════ -->
       <div v-if="!data.operators.length" class="acard text-center text-grey-5 q-py-xl q-mb-lg">
         <q-icon name="people_outline" size="40px" class="q-mb-sm" />
@@ -1638,6 +1707,70 @@ const callData = computed(() => {
   }))
 })
 
+const TREND_COLORS = ['#3949AB', '#43A047', '#FB8C00', '#8E24AA', '#00897B', '#E53935', '#1E88E5', '#6D4C41']
+const operatorTrendSelected = ref([])
+
+const operatorTrendOperators = computed(() => data.value?.operator_daily_trends?.operators || [])
+const operatorTrendOptions = computed(() =>
+  operatorTrendOperators.value.map(op => ({ value: op.id, label: op.name }))
+)
+
+watch(operatorTrendOperators, (ops) => {
+  if (!ops.length) {
+    operatorTrendSelected.value = []
+    return
+  }
+  const validIds = new Set(ops.map(op => op.id))
+  const current = operatorTrendSelected.value.filter(id => validIds.has(id))
+  if (current.length) {
+    operatorTrendSelected.value = current
+    return
+  }
+  operatorTrendSelected.value = [...ops]
+    .sort((a, b) => sumSeries(b.calls_count) - sumSeries(a.calls_count))
+    .slice(0, 5)
+    .map(op => op.id)
+}, { immediate: true })
+
+const visibleTrendOperators = computed(() => {
+  const selected = new Set(operatorTrendSelected.value)
+  return operatorTrendOperators.value.filter(op => selected.has(op.id))
+})
+
+const operatorTrendSeries = computed(() =>
+  visibleTrendOperators.value.map((op, idx) => ({
+    key: `op_${op.id}`,
+    label: op.name,
+    color: TREND_COLORS[idx % TREND_COLORS.length],
+  }))
+)
+
+function sumSeries(values = []) {
+  return values.reduce((sum, value) => sum + (Number(value) || 0), 0)
+}
+
+function operatorTrendChartData(metric) {
+  const trend = data.value?.operator_daily_trends
+  if (!trend) return []
+  return trend.labels.map((label, idx) => {
+    const row = { label }
+    for (const op of visibleTrendOperators.value) {
+      row[`op_${op.id}`] = op[metric]?.[idx] || 0
+    }
+    return row
+  })
+}
+
+const partnerCoverageData = computed(() => {
+  const coverage = data.value?.partner_contact_coverage
+  if (!coverage) return []
+  return coverage.labels.map((label, idx) => ({
+    label,
+    contacted: coverage.partners_with_transcribed_audio_call?.[idx] || 0,
+    never: coverage.partners_never_contacted?.[idx] || 0,
+  }))
+})
+
 // ── Money formatter ──────────────────────────────────────────────────────────
 function fmtMoney(val) {
   const n = Number(val) || 0
@@ -1812,6 +1945,26 @@ async function sendChat() {
 
 <style scoped>
 .analytics-root { max-width: 1200px; }
+
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.trend-chart {
+  min-width: 0;
+}
+.trend-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #424242;
+  margin-bottom: 8px;
+}
+@media (max-width: 900px) {
+  .trend-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* ── Custom date range bar ────────────────────────────────────────── */
 .custom-range-bar {

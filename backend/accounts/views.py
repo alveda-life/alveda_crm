@@ -1,6 +1,6 @@
 from django.utils import timezone
 from datetime import timedelta, date as date_cls, datetime as dt_cls, time as time_cls
-from django.db.models import Count, Q, Sum
+from django.db.models import Avg, Count, Min, Q, Sum
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -445,6 +445,126 @@ class AnalyticsView(APIView):
                 'tasks_created':   [t_map.get(str(w), 0) for w in weeks],
                 'tasks_completed': [tc_map.get(str(w), 0) for w in weeks],
             }
+
+        # ------------------------------------------------------------------ #
+        # Operator daily trends and CRM contact coverage
+        # ------------------------------------------------------------------ #
+        if period == 'today':
+            trend_dates = [today]
+        elif period in ('week', 'month', 'custom'):
+            trend_dates = date_list
+        else:
+            trend_start = today - timedelta(days=89)
+            trend_dates = [trend_start + timedelta(days=i) for i in range(90)]
+
+        trend_labels = [d.strftime('%b %d') for d in trend_dates]
+        trend_start_dt = timezone.make_aware(dt_cls.combine(trend_dates[0], time_cls.min))
+        trend_end_dt = timezone.make_aware(dt_cls.combine(trend_dates[-1] + timedelta(days=1), time_cls.min))
+
+        from contacts.models import CallInsight
+
+        operators_for_trends = list(User.objects.filter(role=User.ROLE_OPERATOR, is_active=True).order_by('first_name', 'username'))
+        operator_ids_for_trends = [u.id for u in operators_for_trends]
+
+        op_contact_rows = (
+            Contact.objects
+            .filter(created_by_id__in=operator_ids_for_trends, date__gte=trend_start_dt, date__lt=trend_end_dt)
+            .annotate(bucket=TruncDate('date'))
+            .values('created_by_id', 'bucket')
+            .annotate(
+                calls_count=Count('id', filter=Q(is_missed_call=False, callback_later=False)),
+                missed_calls_count=Count('id', filter=Q(is_missed_call=True)),
+                total_call_seconds=Sum('call_duration', filter=Q(is_missed_call=False, callback_later=False)),
+                avg_call_seconds=Avg(
+                    'call_duration',
+                    filter=Q(is_missed_call=False, callback_later=False, call_duration__isnull=False),
+                ),
+            )
+        )
+        op_contact_map = {
+            (row['created_by_id'], row['bucket']): row
+            for row in op_contact_rows
+        }
+
+        op_insight_rows = (
+            CallInsight.objects
+            .filter(
+                created_by_id__in=operator_ids_for_trends,
+                call_date__gte=trend_start_dt,
+                call_date__lt=trend_end_dt,
+                status=CallInsight.STATUS_DONE,
+            )
+            .annotate(bucket=TruncDate('call_date'))
+            .values('created_by_id', 'bucket')
+            .annotate(insights_count=Sum('insight_count'))
+        )
+        op_insight_map = {
+            (row['created_by_id'], row['bucket']): row['insights_count'] or 0
+            for row in op_insight_rows
+        }
+
+        operator_daily_trends = {
+            'labels': trend_labels,
+            'dates': [str(d) for d in trend_dates],
+            'operators': [],
+        }
+        for op in operators_for_trends:
+            calls = []
+            missed = []
+            total_minutes = []
+            avg_minutes = []
+            insights = []
+            for d in trend_dates:
+                contact_row = op_contact_map.get((op.id, d), {})
+                total_seconds = contact_row.get('total_call_seconds') or 0
+                avg_seconds = contact_row.get('avg_call_seconds')
+                calls.append(contact_row.get('calls_count') or 0)
+                missed.append(contact_row.get('missed_calls_count') or 0)
+                total_minutes.append(round(total_seconds / 60.0, 1))
+                avg_minutes.append(round(avg_seconds / 60.0, 1) if avg_seconds else 0)
+                insights.append(op_insight_map.get((op.id, d), 0))
+
+            operator_daily_trends['operators'].append({
+                'id': op.id,
+                'name': op.get_full_name() or op.username,
+                'username': op.username,
+                'calls_count': calls,
+                'missed_calls_count': missed,
+                'total_call_minutes': total_minutes,
+                'avg_call_minutes': avg_minutes,
+                'insights_count': insights,
+            })
+
+        partner_created_dates = [
+            timezone.localtime(created_at).date()
+            for created_at in Partner.objects.values_list('created_at', flat=True)
+            if created_at
+        ]
+        first_audio_call_dates = [
+            timezone.localtime(row['first_call']).date()
+            for row in (
+                Contact.objects
+                .filter(
+                    audio_file__isnull=False,
+                    transcription_status=Contact.TRANSCRIPTION_DONE,
+                )
+                .exclude(audio_file='')
+                .values('partner_id')
+                .annotate(first_call=Min('date'))
+            )
+            if row['first_call']
+        ]
+        partner_contact_coverage = {
+            'labels': trend_labels,
+            'dates': [str(d) for d in trend_dates],
+            'partners_with_transcribed_audio_call': [],
+            'partners_never_contacted': [],
+        }
+        for d in trend_dates:
+            partner_total = sum(1 for created_date in partner_created_dates if created_date <= d)
+            contacted_total = sum(1 for first_call_date in first_audio_call_dates if first_call_date <= d)
+            partner_contact_coverage['partners_with_transcribed_audio_call'].append(contacted_total)
+            partner_contact_coverage['partners_never_contacted'].append(max(partner_total - contacted_total, 0))
 
         # ------------------------------------------------------------------ #
         # Overview KPIs
@@ -974,6 +1094,8 @@ class AnalyticsView(APIView):
             'by_state': state_rows,
             'by_referral': referral_rows,
             'time_series': time_series,
+            'operator_daily_trends': operator_daily_trends,
+            'partner_contact_coverage': partner_contact_coverage,
             'operators': operators,
             'task_overview':        task_overview,
             'task_by_priority':     task_by_priority,

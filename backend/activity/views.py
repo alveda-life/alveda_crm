@@ -1,7 +1,7 @@
 from datetime import datetime, time as time_cls, timedelta
 from collections import defaultdict
 
-from django.db.models import Max
+from django.db.models import Avg, Count, Max, Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
@@ -54,6 +54,72 @@ def _day_range(d):
     return start, end
 
 
+def _empty_call_stats():
+    return {
+        'calls_count': 0,
+        'missed_calls_count': 0,
+        'total_call_seconds': 0,
+        'avg_call_seconds': None,
+        'insights_count': 0,
+    }
+
+
+def _operator_call_stats(user_ids, start, end):
+    """Aggregate call and insight metrics keyed by operator user id."""
+    if not user_ids:
+        return {}
+
+    from contacts.models import CallInsight, Contact
+
+    stats = {uid: _empty_call_stats() for uid in user_ids}
+
+    contact_rows = (
+        Contact.objects
+        .filter(created_by_id__in=user_ids, date__gte=start, date__lt=end)
+        .values('created_by_id')
+        .annotate(
+            calls_count=Count('id', filter=Q(is_missed_call=False, callback_later=False)),
+            missed_calls_count=Count('id', filter=Q(is_missed_call=True)),
+            total_call_seconds=Sum(
+                'call_duration',
+                filter=Q(is_missed_call=False, callback_later=False),
+            ),
+            avg_call_seconds=Avg(
+                'call_duration',
+                filter=Q(is_missed_call=False, callback_later=False, call_duration__isnull=False),
+            ),
+        )
+    )
+    for row in contact_rows:
+        uid = row['created_by_id']
+        if uid not in stats:
+            continue
+        stats[uid].update({
+            'calls_count': row['calls_count'] or 0,
+            'missed_calls_count': row['missed_calls_count'] or 0,
+            'total_call_seconds': int(row['total_call_seconds'] or 0),
+            'avg_call_seconds': int(round(row['avg_call_seconds'])) if row['avg_call_seconds'] else None,
+        })
+
+    insight_rows = (
+        CallInsight.objects
+        .filter(
+            created_by_id__in=user_ids,
+            call_date__gte=start,
+            call_date__lt=end,
+            status=CallInsight.STATUS_DONE,
+        )
+        .values('created_by_id')
+        .annotate(insights_count=Sum('insight_count'))
+    )
+    for row in insight_rows:
+        uid = row['created_by_id']
+        if uid in stats:
+            stats[uid]['insights_count'] = row['insights_count'] or 0
+
+    return stats
+
+
 def _resolve_users(request):
     """Return queryset of users to include in admin views (operators by default)."""
     role_param = request.query_params.get('role', 'operator')
@@ -91,6 +157,7 @@ class ActivityIngestView(APIView):
 
         target_date = _parse_date_or(timezone.localdate(), request.query_params.get('date'))
         start, end = _day_range(target_date)
+        call_stats = _operator_call_stats([user_id], start, end).get(user_id, _empty_call_stats())
 
         qs = (
             UserActivityEvent.objects
@@ -106,7 +173,9 @@ class ActivityIngestView(APIView):
         paginator = ActivityEventsPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
         serializer = UserActivityEventOutSerializer(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
+        response = paginator.get_paginated_response(serializer.data)
+        response.data['call_stats'] = call_stats
+        return response
 
     def post(self, request):
         payload = request.data
@@ -203,6 +272,7 @@ class ActivitySummaryView(APIView):
             return Response({'date': str(target_date), 'operators': []})
 
         user_ids = [u.id for u in users]
+        call_stats = _operator_call_stats(user_ids, start, end)
         events = (
             UserActivityEvent.objects
             .filter(user_id__in=user_ids, created_at__gte=start, created_at__lt=end)
@@ -232,6 +302,7 @@ class ActivitySummaryView(APIView):
                     'total_events':  0,
                     'sessions_count': 0,
                     'longest_gap_minutes': 0,
+                    **call_stats.get(u.id, _empty_call_stats()),
                 })
                 continue
 
@@ -261,6 +332,7 @@ class ActivitySummaryView(APIView):
                 'total_events':  total_events,
                 'sessions_count': sessions,
                 'longest_gap_minutes': int(longest_gap.total_seconds() // 60),
+                **call_stats.get(u.id, _empty_call_stats()),
             })
 
         result.sort(key=lambda r: r['active_minutes'], reverse=True)
@@ -381,6 +453,7 @@ class ActivityHeatmapView(APIView):
         user_ids = [u.id for u in users]
         period_start, _ = _day_range(date_from)
         _, period_end = _day_range(date_to)
+        call_stats = _operator_call_stats(user_ids, period_start, period_end)
 
         rows = (
             UserActivityEvent.objects
@@ -416,6 +489,7 @@ class ActivityHeatmapView(APIView):
                     'username':  u.username,
                     'full_name': u.get_full_name() or u.username,
                     'role':      u.role,
+                    **call_stats.get(u.id, _empty_call_stats()),
                 }
                 for u in users
             ],
