@@ -35,6 +35,7 @@ def _delta(before, after, key):
 # Guards against concurrent CRM imports racing each other and creating duplicate
 # partner rows when APScheduler fires the same job in every worker simultaneously.
 _CRM_PARTNERS_SYNC_LOCK_KEY = 8472001
+_OPERATOR_DAILY_TELEGRAM_LOCK_KEY = 8472002
 
 
 # ── External CRM: partners import ───────────────────────────────────────────
@@ -94,6 +95,37 @@ def run_general_insights_refresh():
     from contacts.aggregation import refresh_all_rolling
     kinds = refresh_all_rolling()
     return f'Refresh queued: {", ".join(kinds)}'
+
+
+# ── Operator Daily Telegram Report (Mon-Fri 10:00 IST) ─────────────────────
+@logged_job('operator_daily_telegram_report')
+def run_operator_daily_telegram_report():
+    """Send per-operator stats to the existing Telegram insights chat.
+
+    Monday reports the previous Friday; Tue-Fri report yesterday. Wrapped in a
+    PostgreSQL advisory lock because APScheduler starts in each gunicorn worker.
+    """
+    from django.db import connection
+    from .operator_daily_telegram import send_operator_daily_report, target_report_date
+
+    with connection.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", [_OPERATOR_DAILY_TELEGRAM_LOCK_KEY])
+        got_lock = cur.fetchone()[0]
+
+    if not got_lock:
+        logger.info('operator_daily_telegram_report skipped: another worker holds the advisory lock')
+        return 'Operator daily Telegram report skipped (lock held by another worker)'
+
+    try:
+        report_date = target_report_date()
+        result = send_operator_daily_report(report_date)
+        return (
+            f'Operator daily Telegram report sent for {report_date} · '
+            f'operators={result["operators"]} · messages={len(result["message_ids"])}'
+        )
+    finally:
+        with connection.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", [_OPERATOR_DAILY_TELEGRAM_LOCK_KEY])
 
 
 # ── Maintenance: continuous self-healing of the AI pipeline ────────────────

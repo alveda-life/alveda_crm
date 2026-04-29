@@ -167,13 +167,27 @@ def start():
         except Exception as e:
             logger.error('Failed to register general-insights refresh: %s', e)
 
+        # ---- Operator Daily Telegram Report (Mon-Fri 10:00 IST) ----
+        try:
+            from .sync_runners import run_operator_daily_telegram_report
+            scheduler.add_job(
+                run_operator_daily_telegram_report,
+                CronTrigger(day_of_week='mon-fri', hour=10, minute=0, timezone=IST_TZ),
+                id='operator_daily_telegram_report',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            logger.error('Failed to register operator daily Telegram report: %s', e)
+
         scheduler.start()
         logger.info(
             'Schedulers started: '
             'producer daily 18:00 Riga (Mon-Fri), producer weekly Fri 14:00 Riga, '
             'brand situation Fri 15:00 IST, brand-situation retry daily 18:00 IST (Mon-Fri), '
             'operator daily feedback 09:00 IST (Mon-Fri), weekly Mon 09:30 IST, '
-            'CRM partners hourly :05 IST.'
+            'operator daily Telegram report 10:00 IST (Mon-Fri), CRM partners hourly :05 IST.'
         )
     except Exception as e:
         logger.error(f'Failed to start scheduler: {e}')
